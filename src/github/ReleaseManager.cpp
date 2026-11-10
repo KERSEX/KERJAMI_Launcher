@@ -140,6 +140,13 @@ void ReleaseManager::onFetched(const Project& project, const NetworkResult& resu
     selection.release = *newest;
     selection.asset = asset;
     selection.downloadUrl = downloadUrl(project, *newest, asset);
+    if (asset.sha256.isEmpty()) {
+        // No digest from GitHub: a checksum file of the same release can stand in for it.
+        bool bareHashAllowed = false;
+        if (const ReleaseAsset* sums = ReleaseParser::checksumAsset(*newest, asset, &bareHashAllowed))
+            selection.checksumFile =
+                ChecksumFile {sums->name, downloadUrl(project, *newest, *sums), bareHashAllowed};
+    }
     m_latest.insert(project.id, selection);
 
     qCInfo(lcReleases).noquote() << "Newest release of" << project.id << "is" << newest->version.toString()

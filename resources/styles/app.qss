@@ -78,6 +78,11 @@ QLabel[role="glyph"] {
     color: @textSecondary;
 }
 
+QLabel[role="error"] {
+    color: @danger;
+    font-size: 13px;
+}
+
 /* ---- Containers ------------------------------------------------------------ */
 
 QFrame[card="true"] {

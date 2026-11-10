@@ -7,6 +7,12 @@
 #include "downloads/DownloadManager.h"
 #include "github/GitHubClient.h"
 #include "github/RegistryManager.h"
+#include "github/ReleaseManager.h"
+#include "installer/InstallService.h"
+#include "installer/InstalledProjects.h"
+#include "installer/Installer.h"
+#include "installer/LibraryLayout.h"
+#include "installer/Uninstaller.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 
@@ -115,7 +121,22 @@ int Application::run()
     // stopped and their partial files removed while the client still exists.
     DownloadManager downloads(client, paths.tempDir(), paths.downloadsDir());
 
-    ui::MainWindow window(paths, settings, registry, downloads);
+    // What an interrupted installation or removal left in temp/ is of no use.
+    // Nothing else is running yet: the instance lock is held.
+    const LibraryLayout layout(paths.libraryDir(), paths.tempDir());
+    if (const int removed = layout.cleanupTemp(); removed > 0)
+        qCInfo(lcApp) << "Removed" << removed << "leftover folder(s) from temp";
+
+    InstalledProjects installed(paths.stateFile());
+    const InstalledProjects::LoadResult installedResult = installed.load();
+
+    // Destroyed in reverse order: the service first, then the workers it uses.
+    ReleaseManager releases(client);
+    Installer installer(layout, installed);
+    Uninstaller uninstaller(layout, installed);
+    InstallService installService(client, releases, downloads, installer, uninstaller, installed, layout);
+
+    ui::MainWindow window(paths, settings, registry, downloads, installService, installed);
     window.show();
 
     if (settings.settings().registryAutoCheck)
@@ -133,6 +154,22 @@ int Application::run()
                       .arg(QDir::toNativeSeparators(settings.backupPath()));
         }
         QMessageBox::warning(&window, tr("Einstellungen zurückgesetzt"), message);
+    }
+
+    if (installedResult == InstalledProjects::LoadResult::RecoveredFromCorruption
+        || installedResult == InstalledProjects::LoadResult::RecoveredFromNewerSchema) {
+        const QString reason = installedResult == InstalledProjects::LoadResult::RecoveredFromCorruption
+            ? tr("Die Liste der installierten Projekte war beschädigt.")
+            : tr("Die Liste der installierten Projekte stammt von einer neueren Version.");
+        QString message = reason + u' '
+            + tr("Die Projekte sind deshalb nicht als installiert eingetragen. Ihre Dateien liegen "
+                 "unverändert im Ordner library und werden beim erneuten Installieren gesichert.");
+        if (!installed.backupPath().isEmpty()) {
+            message += u"\n\n"_s
+                + tr("Die bisherige Datei wurde gesichert:\n%1")
+                      .arg(QDir::toNativeSeparators(installed.backupPath()));
+        }
+        QMessageBox::warning(&window, tr("Installierte Projekte"), message);
     }
 
     const int exitCode = m_app.exec();

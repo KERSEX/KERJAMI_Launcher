@@ -18,6 +18,7 @@ Q_LOGGING_CATEGORY(lcNetwork, "launcher.network", QtInfoMsg)
 Q_LOGGING_CATEGORY(lcRegistry, "launcher.registry", QtInfoMsg)
 Q_LOGGING_CATEGORY(lcReleases, "launcher.releases", QtInfoMsg)
 Q_LOGGING_CATEGORY(lcDownload, "launcher.download", QtInfoMsg)
+Q_LOGGING_CATEGORY(lcInstall, "launcher.install", QtInfoMsg)
 
 namespace {
 

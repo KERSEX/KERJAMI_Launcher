@@ -31,6 +31,7 @@ ThemePalette darkPalette()
     dark.accent = QColor(0x00, 0xC8, 0xFF);
     dark.accentHover = QColor(0x3D, 0xD6, 0xFF);
     dark.accentPressed = QColor(0x00, 0xA4, 0xD1);
+    dark.danger = QColor(0xFF, 0x6B, 0x6B);
     dark.textPrimary = QColor(0xF2, 0xF2, 0xF2);
     dark.textSecondary = QColor(0x99, 0x99, 0xA3);
     dark.textOnAccent = QColor(0x05, 0x13, 0x18);
@@ -98,6 +99,7 @@ QString loadStyleSheet(const ThemePalette& c)
         {u"@border"_s, c.border.name()},
         {u"@accentHover"_s, c.accentHover.name()},
         {u"@accentPressed"_s, c.accentPressed.name()},
+        {u"@danger"_s, c.danger.name()},
         {u"@accentSoft"_s, rgba(c.accent, 16)},
         {u"@accent"_s, c.accent.name()},
         {u"@textPrimary"_s, c.textPrimary.name()},

@@ -23,6 +23,7 @@ struct ThemePalette {
     QColor accent;
     QColor accentHover;
     QColor accentPressed;
+    QColor danger; ///< Error text.
     QColor textPrimary;
     QColor textSecondary;
     QColor textOnAccent;

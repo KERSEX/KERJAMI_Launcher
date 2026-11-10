@@ -14,10 +14,13 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Die Phasen 1 bis 3 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Die Phasen 1 bis 4 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
 Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die Projekt-Registry mit
-Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version und die
-Download-Warteschlange mit Fortschritt. Installation und Updates folgen. Details stehen in
+Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version, die
+Download-Warteschlange mit Fortschritt und die Installation: SHA-256-Prüfung, ZIP-Prüfung und
+sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden in
+der Bibliothek installiert, gestartet und entfernt. Automatische Updates der Projekte und das
+Selbstupdate des Launchers folgen. Details stehen in
 [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 ## Bauen
@@ -54,9 +57,12 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `GitHubClientTests` | URL-Policy, Wiederholungen, Rate Limit, Größenlimit, Redirects |
 | `RegistryManagerTests` | Laden, Cache, Offline-Verhalten, beschädigter Cache |
 | `SemVerTests` | Versionen lesen und vergleichen nach SemVer 2.0 |
-| `ReleaseTests` | Release-Antwort lesen, Datei wählen, Prüfsumme, ReleaseManager |
+| `ReleaseTests` | Release-Antwort lesen, Datei wählen, Prüfsumme und Prüfsummendatei, ReleaseManager |
 | `DownloadTests` | Download-Warteschlange, Fortschritt, Abbruch, Größen- und Speicherfehler |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek, Downloads-Seite |
+| `SecurityTests` | SHA-256, ZIP-Leser mit kaputten und feindlichen Archiven, Pfadregeln, Validator, Extraktor |
+| `InstallerTests` | Installation, Update mit Backup, Rollback, Deinstallation, gesperrte Dateien, Links |
+| `InstallServiceTests` | Die ganze Kette gegen einen lokalen Server, falsche Hashes, Abbruch |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten, Downloads-Seite |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 `build\release\screenshots` ab.
@@ -67,6 +73,10 @@ Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 cmake/Branding.cmake   Produktname, EXE-Namen, GitHub-Koordinaten, Registry-URL
 src/app/               Startsequenz und Branding
 src/core/              PathManager, SettingsManager, Logger, JSON-Dateien
+src/github/            GitHub-Client, Registry, Releases
+src/downloads/         Download-Warteschlange
+src/security/          SHA-256, ZIP-Leser, Archiv-Prüfung
+src/installer/         Installer, Deinstallation, Liste der Installationen, Start
 src/models/            Datentypen
 src/ui/                Hauptfenster, Seiten, Controls, Theme
 resources/images/      Logo und Icons (erzeugt aus logo-source.png)
@@ -82,8 +92,8 @@ docs/                  Bestandsaufnahme, Plan, Entscheidungen
 KERJAMI.exe
 launcher/     Einstellungen und Launcher-Status
 library/      installierte Projekte
-downloads/    geprüfte Downloads
-temp/         Teil-Downloads und Staging
+downloads/    heruntergeladene Archive bis zur Installation
+temp/         Teil-Downloads, Staging, entfernte Projekte vor dem Löschen
 cache/        Registry- und Release-Cache
 logs/         Logdateien
 ```

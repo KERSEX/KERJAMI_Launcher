@@ -18,6 +18,10 @@ launcher_add_test(RegistryManagerTests)
 launcher_add_test(SemVerTests)
 launcher_add_test(ReleaseTests)
 launcher_add_test(DownloadTests)
+# The test archives are built with the zlib inside Qt.
+launcher_add_test(SecurityTests Qt6::ZlibPrivate)
+launcher_add_test(InstallerTests Qt6::ZlibPrivate)
+launcher_add_test(InstallServiceTests Qt6::ZlibPrivate)
 
 # The UI test runs without a visible window. Screenshots of every page are
 # written to the build directory for visual review.

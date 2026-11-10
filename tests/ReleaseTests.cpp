@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPair>
 #include <QTest>
 #include <QTimer>
 
@@ -125,9 +126,11 @@ private slots:
     void assetPatterns();
     void assetFileNames_data();
     void assetFileNames();
+    void checksumFileSelection();
 
     // Manager
     void managerSelectsTheNewestRelease();
+    void managerOffersAChecksumFileOnlyWithoutDigest();
     void downloadAddressIsBuiltNotTaken();
     void tagWithBuildMetadataGivesAValidAddress();
     void managerReportsNoStableRelease();
@@ -498,7 +501,95 @@ void ReleaseTests::assetFileNames()
     QCOMPARE(RP::isValidAssetFileName(name), valid);
 }
 
+void ReleaseTests::checksumFileSelection()
+{
+    const auto make = [](const QList<QPair<QString, qint64>>& files) {
+        Release release;
+        for (const auto& [name, size] : files) {
+            ReleaseAsset asset;
+            asset.name = name;
+            asset.size = size;
+            release.assets.append(asset);
+        }
+        return release;
+    };
+    ReleaseAsset zip;
+    zip.name = u"Demo-1.0.0.zip"_s;
+    zip.size = 5000;
+    bool bare = false;
+
+    // A file of its own for the asset, even if a combined list exists too.
+    Release release = make({{zip.name, 5000}, {u"SHA256SUMS"_s, 200}, {u"Demo-1.0.0.zip.sha256"_s, 80}});
+    const ReleaseAsset* found = RP::checksumAsset(release, zip, &bare);
+    QVERIFY(found);
+    QCOMPARE(found->name, u"Demo-1.0.0.zip.sha256"_s);
+    QVERIFY(bare);
+
+    release = make({{zip.name, 5000}, {u"demo-1.0.0.ZIP.SHA256SUM"_s, 80}});
+    found = RP::checksumAsset(release, zip, &bare);
+    QVERIFY(found);
+    QVERIFY(bare);
+
+    // A combined list: the hash must be named, so no bare hash.
+    release = make({{zip.name, 5000}, {u"sha256sums.txt"_s, 300}});
+    found = RP::checksumAsset(release, zip, &bare);
+    QVERIFY(found);
+    QCOMPARE(found->name, u"sha256sums.txt"_s);
+    QVERIFY(!bare);
+
+    // Nothing that fits.
+    QVERIFY(!RP::checksumAsset(make({{zip.name, 5000}}), zip, &bare));
+    QVERIFY(!RP::checksumAsset(
+        make({{zip.name, 5000}, {u"Other.zip.sha256"_s, 80}, {u"checksums.md"_s, 80}}), zip, &bare));
+    QVERIFY(!RP::checksumAsset(make({{zip.name, 5000}, {u"Demo-1.0.0.zip.sha256x"_s, 80}}), zip, nullptr));
+
+    // Several candidates in a group: none is chosen, and the next group is not tried.
+    QVERIFY(!RP::checksumAsset(make({{zip.name, 5000}, {u"Demo-1.0.0.zip.sha256"_s, 80},
+                                   {u"Demo-1.0.0.zip.sha256sum"_s, 80}, {u"SHA256SUMS"_s, 200}}),
+        zip, &bare));
+    QVERIFY(!RP::checksumAsset(
+        make({{zip.name, 5000}, {u"SHA256SUMS"_s, 200}, {u"SHA256SUMS.txt"_s, 200}}), zip, &bare));
+
+    // Implausible sizes: empty, or far larger than a checksum file.
+    QVERIFY(!RP::checksumAsset(make({{zip.name, 5000}, {u"Demo-1.0.0.zip.sha256"_s, 0}}), zip, &bare));
+    QVERIFY(!RP::checksumAsset(
+        make({{zip.name, 5000}, {u"SHA256SUMS"_s, RP::kMaxChecksumFileBytes + 1}}), zip, &bare));
+}
+
 // ---- Manager -----------------------------------------------------------------
+
+void ReleaseTests::managerOffersAChecksumFileOnlyWithoutDigest()
+{
+    // No digest from GitHub, one checksum file: offered, with an address built like the asset's.
+    m_next = body(list({release(u"v1.2.0"_s,
+        {asset(u"Demo-1.2.0.zip"_s, 3000), asset(u"Demo-1.2.0.zip.sha256"_s, 80),
+            asset(u"Notes.txt"_s, 10)})}));
+    auto manager = makeManager();
+    Outcome outcome = fetch(*manager, demoProject());
+    QVERIFY(outcome.ready);
+    QVERIFY(outcome.selection.checksumFile.has_value());
+    QCOMPARE(outcome.selection.checksumFile->name, u"Demo-1.2.0.zip.sha256"_s);
+    QCOMPARE(outcome.selection.checksumFile->url.path(),
+        u"/KERSEX/Demo/releases/download/v1.2.0/Demo-1.2.0.zip.sha256"_s);
+    QCOMPARE(outcome.selection.checksumFile->url.host(), u"127.0.0.1"_s);
+    QVERIFY(outcome.selection.checksumFile->bareHashAllowed);
+    QVERIFY(outcome.selection.hasTrustedHashSource());
+
+    // With a digest the checksum file is not needed.
+    m_next = body(list({release(
+        u"v1.2.0"_s, {asset(u"Demo-1.2.0.zip"_s, 3000, kDigest), asset(u"Demo-1.2.0.zip.sha256"_s, 80)})}));
+    outcome = fetch(*manager, demoProject());
+    QVERIFY(outcome.ready);
+    QVERIFY(!outcome.selection.checksumFile.has_value());
+    QVERIFY(outcome.selection.hasTrustedHashSource());
+
+    // Neither: the release cannot be verified, which the caller must act on.
+    m_next = body(list({release(u"v1.2.0"_s, {asset(u"Demo-1.2.0.zip"_s, 3000)})}));
+    outcome = fetch(*manager, demoProject());
+    QVERIFY(outcome.ready);
+    QVERIFY(!outcome.selection.checksumFile.has_value());
+    QVERIFY(!outcome.selection.hasTrustedHashSource());
+}
 
 void ReleaseTests::managerSelectsTheNewestRelease()
 {

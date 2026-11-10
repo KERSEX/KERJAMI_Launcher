@@ -91,8 +91,9 @@ gebraucht (siehe `03-entscheidungen.md`, E-02).
 
 ### 4. ZIP-Bibliothek
 
-Weder libarchive noch QuaZip sind installiert. Beide müssen für Phase 4 mit llvm-mingw gebaut
-und statisch gelinkt werden. Die Auswahl fällt in Phase 4.
+Weder libarchive noch QuaZip sind installiert. Beide hätten für Phase 4 mit llvm-mingw gebaut und
+statisch gelinkt werden müssen. Entschieden in Phase 4: ein eigener, strenger ZIP-Leser auf dem
+zlib, das in Qt steckt (`03-entscheidungen.md`, D-27). Es kommt keine zusätzliche Bibliothek hinzu.
 
 ## Netzwerk
 

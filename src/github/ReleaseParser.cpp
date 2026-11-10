@@ -152,6 +152,44 @@ QList<ReleaseAsset> matchingAssets(const Release& release, const QString& patter
     return matches;
 }
 
+const ReleaseAsset* checksumAsset(const Release& release, const ReleaseAsset& asset, bool* bareHashAllowed)
+{
+    struct Lookup {
+        const ReleaseAsset* found = nullptr;
+        int candidates = 0;
+    };
+    const auto find = [&](const QStringList& names) {
+        Lookup lookup;
+        for (const ReleaseAsset& candidate : release.assets) {
+            if (candidate.name == asset.name || !names.contains(candidate.name, Qt::CaseInsensitive))
+                continue;
+            ++lookup.candidates;
+            if (candidate.size > 0 && candidate.size <= kMaxChecksumFileBytes)
+                lookup.found = &candidate;
+        }
+        return lookup;
+    };
+
+    // A group with several candidates yields nothing, and the next group is not
+    // tried then: falling through would hide the ambiguity.
+    const QString own = asset.name;
+    const Lookup sidecar = find({own + u".sha256"_s, own + u".sha256sum"_s});
+    if (sidecar.candidates > 0) {
+        if (sidecar.candidates > 1 || !sidecar.found)
+            return nullptr;
+        if (bareHashAllowed)
+            *bareHashAllowed = true;
+        return sidecar.found;
+    }
+
+    const Lookup combined = find({u"SHA256SUMS"_s, u"SHA256SUMS.txt"_s});
+    if (combined.candidates != 1 || !combined.found)
+        return nullptr;
+    if (bareHashAllowed)
+        *bareHashAllowed = false;
+    return combined.found;
+}
+
 } // namespace ReleaseParser
 
 } // namespace launcher

@@ -15,7 +15,9 @@ endif()
 
 include(cmake/Branding.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets)
+# ZlibPrivate is the zlib that is built into Qt. The ZIP reader uses it to
+# inflate archive entries, so no archive library has to be added (D-27).
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets ZlibPrivate)
 qt_standard_project_setup()
 
 # Everything runnable lands in one folder, which doubles as the portable root
@@ -80,15 +82,37 @@ qt_add_library(launcher_core STATIC
     src/github/ReleaseManager.h
     src/github/ReleaseParser.cpp
     src/github/ReleaseParser.h
+    src/installer/ArchiveExtractor.cpp
+    src/installer/ArchiveExtractor.h
+    src/installer/FileOps.cpp
+    src/installer/FileOps.h
+    src/installer/InstallService.cpp
+    src/installer/InstallService.h
+    src/installer/InstalledProjects.cpp
+    src/installer/InstalledProjects.h
+    src/installer/Installer.cpp
+    src/installer/Installer.h
+    src/installer/LibraryLayout.cpp
+    src/installer/LibraryLayout.h
+    src/installer/ProjectLauncher.cpp
+    src/installer/ProjectLauncher.h
+    src/installer/Uninstaller.cpp
+    src/installer/Uninstaller.h
     src/models/Download.h
     src/models/LauncherSettings.h
     src/models/Project.h
     src/models/Release.h
+    src/security/ArchiveValidator.cpp
+    src/security/ArchiveValidator.h
+    src/security/HashVerifier.cpp
+    src/security/HashVerifier.h
+    src/security/ZipArchive.cpp
+    src/security/ZipArchive.h
 )
 target_include_directories(launcher_core
     PUBLIC src
     PRIVATE "${LAUNCHER_GENERATED_DIR}")
-target_link_libraries(launcher_core PUBLIC Qt6::Core Qt6::Network)
+target_link_libraries(launcher_core PUBLIC Qt6::Core Qt6::Network PRIVATE Qt6::ZlibPrivate)
 launcher_target_defaults(launcher_core)
 
 # --- User interface -----------------------------------------------------------
@@ -97,6 +121,8 @@ qt_add_library(launcher_ui STATIC
     src/ui/Controls.h
     src/ui/DashboardPage.cpp
     src/ui/DashboardPage.h
+    src/ui/Dialogs.cpp
+    src/ui/Dialogs.h
     src/ui/DownloadsPage.cpp
     src/ui/DownloadsPage.h
     src/ui/FlowLayout.cpp
@@ -105,6 +131,8 @@ qt_add_library(launcher_ui STATIC
     src/ui/LibraryPage.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/OperationMessages.cpp
+    src/ui/OperationMessages.h
     src/ui/Page.cpp
     src/ui/Page.h
     src/ui/ProjectCard.cpp

@@ -51,10 +51,6 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 - **Betrifft:** Den echten Abruf in Phase 2 und die Launcher-Releases in Phase 6. Entwickelt und
   getestet wird Phase 2 auch ohne das Repository.
 
-### E-04 ZIP-Bibliothek
-
-- libarchive oder QuaZip, beide müssen selbst gebaut werden. Entscheidung in Phase 4.
-
 ### E-05 Helles Theme
 
 - Die Einstellungen sehen einen Punkt „Theme“ vor, das Designsystem beschreibt nur ein dunkles
@@ -407,14 +403,179 @@ Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
 Zwei Bereiche: „Aktiv“ (Warteschlange und laufende Downloads, mit Fortschrittsbalken, Tempo,
 Restzeit und „Abbrechen“) und „Verlauf“ (neueste zuerst, mit „Verlauf leeren“). Fehlertexte nennen
 den Grund in Klartext („Keine Verbindung“, „Nicht genug freier Speicherplatz“, „Die Datei wurde nicht
-gefunden (HTTP 404)“ und so weiter). Ohne Einträge zeigt die Seite einen Leerzustand. Ein Knopf zum
-Starten eines Downloads kommt mit der Installation in Phase 4.
+gefunden (HTTP 404)“ und so weiter). Ohne Einträge zeigt die Seite einen Leerzustand. Downloads
+startet der Knopf „Installieren“ der Projektkarte (D-34); die Seite selbst startet keine.
+
+### D-27 ZIP-Verarbeitung ohne fremde Bibliothek (vorher E-04)
+
+- **Entscheidung:** Ein eigener, strenger ZIP-Leser (`security/ZipArchive`) auf dem zlib, das in Qt
+  steckt (`Qt6::ZlibPrivate`). Weder libarchive noch QuaZip kommen ins Projekt.
+- **Grund:** Keine Fremdquellen herunterladen und bauen, keine zusätzliche Lizenz und Abhängigkeit,
+  und jede Prüfung aus dem Auftrag (Pfade, Größen, Überlappung, Widersprüche) sitzt an einer Stelle,
+  die wir kennen. Ein Archivformat mit 20 Jahren Ausnahmen wird nicht nachgebaut: der Leser versteht
+  das gewöhnliche ZIP mit „gespeichert“ und „deflate“ und lehnt alles andere ab.
+- **Nicht unterstützt (wird mit klarer Meldung abgelehnt):** ZIP64, Verschlüsselung, andere
+  Kompressionsverfahren, mehrteilige Archive, Namen mit Nicht-ASCII-Zeichen ohne UTF-8-Kennzeichen
+  (die Kodierung wäre geraten, und zwei Programme sähen zwei Namen), Archive mit mehr als 65.534
+  Einträgen, ein Verzeichnis über 16 MiB. Gewöhnliche Programm-ZIPs unter 2 GiB sind davon nicht
+  betroffen. Wer ein Projekt veröffentlicht, packt es ohne ZIP64 und mit UTF-8-Namen.
+- **Strenge des Lesers:** Das Ende-Verzeichnis muss genau am Dateiende stehen und das Verzeichnis
+  genau davor. Jeder lokale Header muss Name, Verfahren und (ohne Datenbeschreibung) Größen und
+  CRC des Verzeichniseintrags wiederholen. Einträge dürfen sich nicht überlappen, nicht ins
+  Verzeichnis hineinragen und nicht außerhalb der Datei liegen. Namen und Typ-Kennzeichnung müssen
+  zusammenpassen. Beim Entpacken werden nie mehr Bytes geschrieben, als der Eintrag angibt (kein
+  Platzfüller durch eine Bombe); Größe, überzählige komprimierte Bytes und CRC-32 werden geprüft.
+- **Risiko:** `ZlibPrivate` ist ein privates Qt-Modul. Das gebündelte zlib ist Teil der statischen
+  Qt-Bibliothek und ändert sich nur mit der Qt-Version, die fest verwendet wird.
+
+### D-28 Prüfsumme: Quelle, Pflicht und Grenzen
+
+- Quellen in dieser Reihenfolge: der Digest, den GitHub für das Asset meldet; sonst eine Datei
+  `<Asset>.sha256` oder `<Asset>.sha256sum` desselben Releases; sonst `SHA256SUMS` oder
+  `SHA256SUMS.txt`. Die Namen werden ohne Beachtung der Groß-/Kleinschreibung verglichen. Gibt es in
+  einer Gruppe mehr als einen Kandidaten, wird keiner gewählt und die nächste Gruppe nicht
+  versucht: Wer rät, welche Prüfsumme gemeint ist, prüft nichts.
+- Eine Datei nur für dieses Asset darf nur den Hash enthalten. Eine Sammeldatei muss das Asset
+  mit Namen nennen. Zeilen im Format von `sha256sum` (`<hash>  <name>`, `<hash> *<name>`) und `#`-Kommentare
+  sind erlaubt. Eine Zeile, die keine Prüfsummenzeile ist, entwertet die ganze Datei.
+- **Ohne Prüfsumme wird nichts installiert, und nichts heruntergeladen.** Der Dienst bricht vor dem
+  Download ab. Es gibt keinen Schalter „trotzdem installieren“: Ein Launcher, der Programme aus dem
+  Internet holt, soll das nicht anbieten. (Der Auftrag lässt das als einstellbare Ausnahme zu; sie
+  wird in Version 1 nicht gebaut und kann später nachgerüstet werden.)
+- Der **Installer** prüft den Hash der Datei, die er entpackt, selbst noch einmal und verlässt sich
+  nicht auf den Download. So hilft die Prüfung auch, wenn die Datei zwischen Download und
+  Installation verändert wurde.
+- **Was die Prüfsumme leistet:** Digest und Prüfsummendatei kommen vom selben GitHub-Release wie die
+  Datei. Sie schützen vor beschädigten und abgeschnittenen Dateien und vor Fehlern auf dem
+  Übertragungsweg. Gegen ein übernommenes Konto oder Repository helfen sie nicht; dagegen
+  hülfen nur Signaturen. Das steht hier, damit niemand mehr in die Prüfsumme hineinliest.
+
+### D-29 Archivregeln
+
+Ein Archiv wird als Ganzes angenommen oder abgelehnt. Der Launcher entpackt nie „den guten Teil“.
+Der `ArchiveValidator` prüft alle Einträge, bevor die erste Datei geschrieben wird:
+
+- **Pfade:** Rückwärts-Schrägstriche werden zu `/` und danach beurteilt (ein Archiv aus PowerShell
+  5.1 ist so nutzbar, `..\..\x` aber trotzdem verboten). Abgelehnt werden: leere Namen, absolute Pfade,
+  Laufwerksangaben, UNC- und Geräte-Pfade, `.` und `..`, leere Segmente, Segmente mit Punkt oder Leerzeichen
+  am Ende, Doppelpunkt (Laufwerk und alternative Datenströme), die Zeichen `< > " | ? *`, Steuer-,
+  Format- und unsichtbare Zeichen (etwa die Umkehr der Schreibrichtung, mit der ein Name „exe.txt“
+  vortäuscht), nicht gepaarte Surrogate, reservierte Windows-Namen (`CON`, `NUL`, `COM1`, auch mit
+  Endung), Segmente über 128 Zeichen und Ordner tiefer als 24 Ebenen.
+- **Pfadlänge:** Das Budget ergibt sich aus Windows' 259 Zeichen minus dem längeren der beiden Ziele
+  (Staging und `current/`) und höchstens 200. Liegt der Programmordner so tief, dass fast nichts
+  bleibt, meldet der Installer das, bevor er etwas schreibt.
+- **Kollisionen:** Zwei Namen, die sich nur durch Groß-/Kleinschreibung unterscheiden, sind verboten
+  (NTFS unterscheidet nicht), ebenso ein Name, der zugleich Datei und Ordner ist.
+- **Typen:** Symbolische Links und Sonderdateien (Gerät, Pipe) werden abgelehnt. Die Kennzeichnung
+  steht im Unix-Modus des Eintrags; ein Archiv kann einen Link nur so ausdrücken.
+- **Grenzen:** 20.000 Einträge, 2 GiB je Datei, 4 GiB gesamt, Kompression höchstens 500:1 für Dateien
+  ab 4 MiB. Deflate kommt kaum über 1030:1; der Schutz vor einer Bombe sind die Größengrenzen und die
+  Platzprüfung, das Verhältnis fängt nur Extremfälle.
+- **Startdatei:** Die Datei aus `executable` der Registry muss im Archiv als Datei liegen, genau an
+  diesem Pfad. Ein Archiv mit einem Oberordner (`Tool-1.2/Tool.exe`) wird nicht „zurechtgestutzt“;
+  das Projekt trägt dann den vollen Pfad in die Registry ein oder packt anders.
+- **Extraktor:** Er schreibt nur, was die Prüfung freigegeben hat, und prüft jedes Ziel noch einmal
+  gegen den Zielordner. Dateien werden mit „darf nicht existieren“ angelegt, überschreiben also
+  nichts. Liegt ein Link im Weg, bricht er ab.
+
+### D-30 Installation als Transaktion
+
+Ablauf im Installer, in einem Hintergrund-Thread: Anfrage prüfen → läuft das Projekt? → SHA-256 →
+Archiv öffnen und prüfen → Platz prüfen → nach `temp/staging-<Projekt>/` entpacken → Startdatei
+prüfen → **erst jetzt** die installierte Version nach `backups/<Version>/` verschieben → Staging nach
+`current/` verschieben → Eintrag in `launcher/launcher.json`.
+
+- Ein Fehler bis zur Startdatei berührt die Bibliothek nicht; das Staging wird gelöscht.
+- Ein Fehler beim Verschieben oder Eintragen stellt die bisherige Version wieder her
+  (`current/` ← Backup). Scheitert auch das, meldet der Installer `RollbackFailed` mit dem Ort des
+  Backups, statt zu raten.
+- Verschieben ist ein Umbenennen auf demselben Laufwerk: ganz oder gar nicht. Dateien und Ordner im
+  Programmordner dürfen nicht über Laufwerke verteilt sein; das ist durch die portable Struktur
+  ausgeschlossen.
+- **Laufendes Projekt:** Windows lässt einen Ordner mit einer geöffneten Datei nicht umbenennen. Das
+  ist der Schutz „laufende Programme niemals überschreiben“: Die Installation meldet
+  `ProjectRunning` und verändert nichts. Zusätzlich nimmt der Installer eine Abfrage „läuft das
+  Projekt?“ entgegen, die Phase 5 mit dem Prozess-Manager füllt. Der Test hält eine Datei so offen
+  wie ein laufendes Programm (ohne Löschfreigabe).
+- Umbenennen wird fünfmal im Abstand von 200 ms versucht, weil ein Virenscanner oder die
+  Windows-Suche eine frisch geschriebene Datei kurz festhalten können.
+- **Backups:** Die zwei neuesten bleiben, ältere werden gelöscht. Dieselbe Version ein zweites Mal
+  (Neuinstallation) und ein Ordner ohne Eintrag (`unknown`) bekommen einen Zeitstempel, damit nichts
+  überschrieben wird. Benutzerdaten, die ein Projekt in `current/` anlegt, wandern bei einer
+  Aktualisierung mit der alten Version ins Backup. Projekte sollten Nutzerdaten außerhalb von
+  `current/` ablegen; das ist eine Anforderung an Projekte, nicht an den Launcher.
+- **Platz:** Entpackte Größe plus 16 MiB müssen auf dem Laufwerk von `temp/` frei sein.
+- **Abbrechen:** bis zum Beginn des Austauschs möglich (Prüfsumme, Entpacken); danach nicht mehr.
+- **Heruntergeladene Datei:** Nach jedem Versuch, gelungen oder nicht, löscht der Dienst das ZIP aus
+  `downloads/`. Ein neuer Versuch lädt es neu. So wächst der portable Ordner nicht (USB-Stick), und
+  eine geprüfte Datei bleibt nirgends liegen, der später ein anderer Hash zugeordnet werden könnte.
+  Phase 5 (vorgemerkte Updates) braucht die Datei über das Schließen des Projekts hinweg und
+  ändert das für diesen Fall.
+- Beim Start entfernt der Launcher übrig gebliebene `staging-*` und `uninstall-*` aus `temp/`
+  (Absturz, Stromausfall). Die Instanz-Sperre stellt sicher, dass kein anderer Installer läuft.
+
+### D-31 Liste der installierten Projekte (`launcher/launcher.json`)
+
+- Schema 1: `{"schema_version":1, "projects": {"<id>": {version, tag, install_directory, executable,
+  installed_at, last_started_at}}}`. Nur Namen und relative Pfade, nie absolute Pfade.
+- Jeder Eintrag wird beim Laden wie fremde Eingabe geprüft (Projekt-ID, Ordnername, Startpfad,
+  Version). Ein ungültiger Eintrag wird verworfen und protokolliert, die anderen bleiben. Eine
+  handbearbeitete Datei kann den Launcher also nicht zum Löschen oder Starten außerhalb der
+  Bibliothek bringen.
+- Eine nicht lesbare Datei wird beiseite gelegt (`launcher.corrupt-<Zeit>.json`), die Liste beginnt
+  leer, der Nutzer erfährt es. Die Projektdateien bleiben liegen; sie gelten als nicht installiert
+  und werden bei einer Neuinstallation als Backup `unknown` gesichert, nicht gelöscht. Eine Datei
+  einer neueren Version wird genauso behandelt (`launcher.newer-…`).
+- Fremde Schlüssel in der Datei bleiben beim Speichern erhalten (Phase 5 und 6 hängen eigene an).
+- Jede Änderung wird sofort atomar gespeichert. Schlägt das fehl, bleibt die Liste im Speicher wie
+  zuvor. Alle Zugriffe sind thread-sicher, weil der Installer im Hintergrund einträgt.
+- Die Dateien auf der Platte sind die Wahrheit, die Liste das Gedächtnis des Launchers. Wurde ein
+  Projektordner von Hand gelöscht, merkt der Start „Datei fehlt“, die Bibliothek gleicht nicht ab.
+
+### D-32 Deinstallation
+
+- Nur der Ordner aus dem Eintrag der Liste wird entfernt (nicht der aus der Registry, die sich
+  geändert haben kann), nach erneuter Prüfung des Namens, und nur wenn er direkt in der Bibliothek
+  liegt und keine Verknüpfung ist (Link oder Junction).
+- Der Ordner wird zuerst nach `temp/uninstall-<Projekt>/` verschoben. Das ist atomar und scheitert
+  sofort, wenn das Projekt läuft. Danach entfällt der Eintrag in der Liste, und das Löschen läuft im
+  Hintergrund. Was dabei liegen bleibt, räumt der nächste Start auf.
+- Links im Projektordner werden entfernt, nie verfolgt (ein Junction auf `C:\Users` löscht
+  `C:\Users` nicht). Schreibgeschützte Dateien werden freigegeben und gelöscht.
+- Gelöscht werden `current/` **und** alle Backups des Projekts. Der Bestätigungsdialog sagt das und
+  dass es nicht rückgängig zu machen ist. Downloads, Einstellungen und andere Projekte bleiben.
+- Fehlt der Ordner schon (von Hand gelöscht), wird nur der Eintrag entfernt.
+
+### D-33 Start eines Projekts (vorläufig)
+
+Gestartet wird nur die Startdatei aus dem Eintrag, aus `current/` des Projekts, ohne Verknüpfung im
+Weg, mit `current/` als Arbeitsordner und losgelöst vom Launcher (`startDetached`): Das Projekt läuft
+weiter, wenn der Launcher geschlossen wird. Die Prozessüberwachung (läuft es? wann endet es?)
+kommt in Phase 5 mit dem `ProcessManager`.
+
+### D-34 Ablauf für den Nutzer: `InstallService` und Projektkarte
+
+- Ein Knopf „Installieren“ führt die ganze Kette aus: neuestes Release, Prüfsumme (Digest oder
+  Datei), Download, Prüfung und Installation. Pro Projekt läuft höchstens eine Operation.
+- Die Karte zeigt „Nicht installiert“ und „Installieren“, oder „Installiert: Version x“ mit
+  „Starten“ und „Deinstallieren“, oder während der Arbeit die Stufe (Release suchen, Prüfsumme
+  lesen, Download mit Fortschritt, prüfen, entpacken, installieren) mit Balken und „Abbrechen“.
+- Fehler stehen in Klartext auf der Karte, bis die nächste Operation beginnt. Der Text nennt, was
+  passiert ist, und wo der Nutzer handeln kann („Beende das Projekt und versuche es erneut“).
+  Technische Einzelheiten stehen im Log, nicht im Dialog.
+- Abbrechen ist kein Fehler (keine rote Meldung). Während der Austausch läuft, ist der Knopf
+  gesperrt.
+- Deinstallieren fragt immer nach. Installieren nicht: Der Klick ist die Bestätigung. Die
+  Bestätigung vor einer Aktualisierung (Modus „manuell“) kommt mit Phase 5.
+- Der Dienst nutzt „Installieren“ auch zum Ersetzen der installierten Version; Phase 5 ruft für
+  Updates dieselbe Kette auf.
 
 ## Bekannte Grenzen
 
-- `PathManager::isInside` vergleicht Pfade lexikalisch. Symbolische Links und Junctions werden
-  nicht aufgelöst. Für die Archiv-Extraktion in Phase 4 kommt eine Prüfung der tatsächlichen
-  Ziele hinzu.
+- `PathManager::isInside` vergleicht Pfade lexikalisch und löst Links und Junctions nicht auf. Die
+  Installation fängt das an den Stellen ab, an denen es zählt: Der Extraktor und der Uninstaller
+  prüfen jeden Ordner auf dem Weg (`FileOps::isLink`), und Links im Archiv gibt es nicht.
 - Der Code ist nur mit clang (llvm-mingw) gebaut. Der MSVC-Zweig in `CMakeLists.txt` ist
   ungetestet.
 - Ein Debug-Build linkt gegen die Release-Bibliotheken von Qt, weil es keine Debug-Variante
@@ -442,4 +603,21 @@ Starten eines Downloads kommt mit der Installation in Phase 4.
   werden direkt in die Datei geschrieben.
 - Der Live-Test der Release-Abfrage (`LAUNCHER_LIVE_TESTS=1`) liest die Release-Liste von
   `nlohmann/json`, einem fremden öffentlichen Repository, und lädt keine Datei herunter. Es gibt
-  keinen Test, der eine echte Datei von GitHub lädt: Dafür fehlt noch das Testprojekt (E-02).
+  keinen Test, der eine echte Datei von GitHub lädt: Dafür fehlt noch das Testprojekt (E-02). Die
+  ganze Installationskette ist bisher nur gegen einen lokalen Server geprüft, der GitHub nachbildet
+  (Adressen, Digest-Feld, Weiterleitungen sind dort nachgestellt, nicht gemessen).
+- Der Schutz vor dem Überschreiben eines laufenden Projekts beruht auf der Windows-Dateisperre: Die
+  EXE eines laufenden Programms und jede geöffnete Datei in `current/` verhindern das Umbenennen
+  des Ordners. Das ist getestet (Datei ohne Löschfreigabe offen halten). Ein Programm, das aus
+  `current/` gestartet wurde, hält immer seine EXE offen; die Sperre ist deshalb verlässlich, aber
+  eine Fehlermeldung „Datei in Benutzung“ kann auch ein Virenscanner auslösen. Phase 5 ergänzt die
+  Prozessüberwachung (`setRunningCheck`), die den Grund genauer nennen kann.
+- Eine Aktualisierung ersetzt `current/` als Ganzes. Dateien, die ein Projekt zur Laufzeit in
+  `current/` anlegt, liegen danach im Backup, nicht in der neuen Version (D-30).
+- Das ZIP muss die Startdatei am Pfad der Registry enthalten und darf kein ZIP64, keine
+  Verschlüsselung und keine Nicht-ASCII-Namen ohne UTF-8-Kennzeichen haben (D-27, D-29). Die Fehlermeldung
+  nennt den Grund; die Ursache liegt dann beim Projekt, das neu packen muss.
+- Die Rückfrage vor dem Deinstallieren ist in den Tests ersetzbar
+  (`Dialogs::setUninstallConfirmationForTests`), weil sich ein modales Fenster nicht aus einem Test
+  bedienen lässt. Die Tests prüfen, dass gefragt wird und dass „Nein“ nichts verändert. Das echte
+  Fenster (Text, Schaltflächen, Standardauswahl „Abbrechen“) wurde noch nicht angesehen.

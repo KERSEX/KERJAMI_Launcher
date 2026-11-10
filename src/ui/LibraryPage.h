@@ -1,6 +1,7 @@
 #pragma once
 
 #include "github/RegistryManager.h"
+#include "installer/InstallService.h"
 #include "models/Project.h"
 #include "ui/Page.h"
 
@@ -22,7 +23,8 @@ class LibraryPage : public Page {
     Q_OBJECT
 
 public:
-    explicit LibraryPage(RegistryManager& registry, QWidget* parent = nullptr);
+    LibraryPage(RegistryManager& registry, InstallService& service, InstalledProjects& installed,
+        QWidget* parent = nullptr);
 
 private:
     void onRegistryChanged();
@@ -32,6 +34,8 @@ private:
     QString statusText() const;
 
     RegistryManager& m_registry;
+    InstallService& m_service;
+    InstalledProjects& m_installed;
     QLineEdit* m_search = nullptr;
     ComboBox* m_category = nullptr;
     ComboBox* m_tag = nullptr;

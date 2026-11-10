@@ -25,8 +25,9 @@ Regeln:
 
 - Die UI ruft Manager auf und reagiert auf deren Signale. Sie öffnet keine Dateien und keine
   Netzwerkverbindungen.
-- Netzwerk läuft asynchron über `QNetworkAccessManager`. Hashing und Entpacken laufen in
-  Worker-Threads (`QtConcurrent`), Ergebnisse kommen per Signal zurück.
+- Netzwerk läuft asynchron über `QNetworkAccessManager`. Hashing, Entpacken und Austausch laufen in
+  Worker-Threads (`QThread::create`), Ergebnisse kommen per Signal zurück. Geteilte Daten
+  (`InstalledProjects`) sind thread-sicher.
 - Alle Pfade kommen aus dem `PathManager`. Kein `QStandardPaths`, kein `QSettings`.
 - Der Produktname steht nur in `cmake/Branding.cmake`. Bezeichner im Code sind neutral
   (`launcher::…`).
@@ -43,9 +44,9 @@ Regeln:
 │   └── launcher.lock            Einzelinstanz-Sperre
 ├── library/<install_directory>/
 │   ├── current/                 aktive Installation
-│   └── backups/                 vorherige Version für Rollback
-├── downloads/                   fertige, geprüfte Downloads
-├── temp/                        Teil-Downloads, Staging
+│   └── backups/<Version>/       die zwei zuletzt ersetzten Versionen für Rollback
+├── downloads/<Projekt>/         heruntergeladene ZIPs, bis zur Installation
+├── temp/                        download-<id>.part, staging-<Projekt>/, uninstall-<Projekt>/
 ├── cache/                       Registry-Cache, Release-Antworten
 └── logs/                        launcher.log, updater.log
 ```
@@ -194,23 +195,71 @@ unterbrochener Versuch beginnt die Datei neu), keine Wiederholung bei 4xx außer
 SHA-256-Prüfung folgt in Phase 4, bevor etwas entpackt wird. Details und Begründungen stehen in
 [03-entscheidungen.md](03-entscheidungen.md), D-21 bis D-26.
 
-### Phase 4 – Installation
+### Phase 4 – Installation (umgesetzt)
 
 ```cpp
-namespace HashVerifier { VerifyResult verifySha256(const QString& file, const QByteArray& expected); }
-namespace ArchiveValidator { ValidationResult validate(const QString& archive, const Limits& limits); }
+namespace HashVerifier {                // security/, reine Funktionen
+bool isValidSha256(const QString& hex);
+QString sha256File(const QString& path, QString* error, const std::atomic<bool>* cancel, const Progress&);
+VerifyResult verifySha256(const QString& path, const QString& expected, cancel, progress);
+QString findInChecksumFile(const QByteArray& content, const QString& fileName, bool allowBareHash);
+}                                       // Status: Match | Mismatch | NoExpectedHash | InvalidExpectedHash | FileError | Cancelled
 
-class Installer : public QObject {      // Staging → Backup → Tausch → Registrierung
-    void install(const Project& project, const Release& release, const QString& verifiedFile);
-signals:
-    void installed(const QString& projectId);  void failed(const QString& projectId, InstallError);
+class ZipArchive {                      // security/, strenger Leser auf Qt-zlib (D-27)
+    static OpenResult open(const QString& path);       // Error: CannotOpen | NotAZip | Unsupported | Corrupt
+    const QList<Entry>& entries() const;               // Name, Art, Verfahren, Größen, CRC, Datenanfang
+    ExtractResult extract(const Entry&, QIODevice& out, const std::atomic<bool>* cancel);
 };
-class Uninstaller { UninstallResult uninstall(const Project& project); };
+namespace ArchiveValidator {            // security/, D-29
+ValidationResult validate(const ZipArchive&, const Limits&, const QString& requiredExecutable);
+QString normalizeEntryPath(const QString& name, const Limits&, bool* isDirectory, QString* reason);
+}                                       // Problem: Empty | TooManyEntries | TooLarge | UnsafePath | DuplicatePath |
+                                        // ConflictingPath | UnsupportedEntry | CompressionBomb | MissingExecutable
+namespace ArchiveExtractor { Result extract(ZipArchive&, const ValidationResult&, const QString& targetDir, cancel, progress); }
+
+class InstalledProjects : public QObject {          // launcher/launcher.json, thread-sicher (D-31)
+    LoadResult load();  bool contains(id);  optional<InstalledProject> get(id);  QList<InstalledProject> all();
+    bool upsert(const InstalledProject&, QString* error);  bool remove(id, QString* error);
+    void recordStart(id, QDateTime);
+signals: void changed(const QString& projectId);
+};
+class LibraryLayout {                   // library/<dir>/current|backups, temp/staging-<id>, temp/uninstall-<id>
+    projectDir(), currentDir(), backupsDir(), stagingDir(), trashDir(), executablePath();  int cleanupTemp() const;
+};
+
+class Installer : public QObject {      // D-30: Prüfen → Staging → Backup → Tausch → Eintrag, alles in einem Thread
+    void install(const InstallRequest&);            // Project, Version, Tag, Archivpfad, SHA-256 (Pflicht)
+    void cancel(const QString& projectId);          // bis zum Beginn des Austauschs
+    void setRunningCheck(std::function<bool(const QString&)>);   // Phase 5 füllt das
+signals:
+    void progress(id, Stage, done, total);  void installed(id, InstallResult);  void failed(id, InstallResult);
+};                                      // InstallError: Busy | InvalidProject | NoTrustedHash | HashMismatch |
+                                        // ArchiveUnreadable | ArchiveRejected | InsufficientSpace | PathTooLong |
+                                        // ExtractionFailed | ProjectRunning | SwapFailed | RegistrationFailed |
+                                        // RollbackFailed | Cancelled
+class Uninstaller : public QObject {    // D-32: erst nach temp/ verschieben, dann im Hintergrund löschen
+    UninstallResult uninstall(const QString& projectId);
+signals: void uninstalled(id);  void cleanupFinished(id, bool complete);
+};
+StartResult startProject(const LibraryLayout&, InstalledProjects&, const QString& projectId);   // D-33
+
+class InstallService : public QObject { // D-34: die Kette hinter dem Knopf „Installieren“
+    void install(const Project&);       // Release → Hash-Quelle → Download → Installer
+    void cancel(id);  UninstallResult uninstall(id);  StartResult start(id);
+    ProjectStatus status(id);  OperationFailure lastFailure(id);
+signals: void statusChanged(id);  void installFinished(id, bool success);
+};
 ```
 
-Ablauf: nach `temp/staging-<id>/` entpacken → erwartete EXE prüfen → `current/` nach
-`backups/<version>/` umbenennen → Staging nach `current/` umbenennen → `launcher.json`
-schreiben. Jeder Fehler nach dem Backup stellt `current/` wieder her.
+`ReleaseSelection` trägt zusätzlich `checksumFile` (Name, Adresse, ob ein nackter Hash genügt), wenn
+GitHub keinen Digest meldet und das Release genau eine passende Prüfsummendatei hat
+(`ReleaseParser::checksumAsset`).
+
+Die Projektkarte der Bibliothek zeigt Zustand, Fortschritt und Fehler und ruft den Dienst auf
+(`ui/ProjectCard`, Meldungstexte in `ui/OperationMessages`, Bestätigung in `ui/Dialogs`).
+
+Der Start räumt übrig gebliebene `staging-*` und `uninstall-*` aus `temp/` auf. Alle Entscheidungen
+und Grenzen stehen in [03-entscheidungen.md](03-entscheidungen.md), D-27 bis D-34.
 
 ### Phase 5 – Projekt-Updates
 
@@ -256,9 +305,11 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
 | `SemVerTests.cpp` | Gültige und ungültige Versionen, Reihenfolge nach der SemVer-Spezifikation | 3 |
-| `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3 |
+| `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, Prüfsummendatei, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3–4 |
 | `DownloadTests.cpp` | Tempo, Formatierung, Warteschlange, Abbruch, Größen- und Speicherfehler | 3 |
-| `SecurityTests.cpp`, `InstallerTests.cpp` | | 4 |
+| `SecurityTests.cpp` | SHA-256, Prüfsummendatei, ZIP-Leser (kaputte und feindliche Archive), Pfadregeln, Validator, Extraktor | 4 |
+| `InstallerTests.cpp` | Installation, Update mit Backup, Rollback, Deinstallation, Liste der Installationen, laufendes Programm, Links | 4 |
+| `InstallServiceTests.cpp` | Die ganze Kette gegen einen lokalen Server: Hash-Quellen, falsche Hashes, feindliche Archive, Abbruch | 4 |
 | `UpdateTests.cpp`, Selbstupdate-Tests | | 5–6 |
 
 ## Stand
@@ -268,7 +319,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 1 | Grundgerüst | umgesetzt |
 | 2 | Registry | umgesetzt und gegen GitHub geprüft; die echte Registry fehlt noch (E-03), bis dahin zeigt die Bibliothek „nicht gefunden (HTTP 404)“ |
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
-| 4 | Installation | offen; der echte Test braucht ein Testprojekt mit ZIP-Releases (E-02) |
+| 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | offen |
 | 6 | Launcher-Selbstupdate | offen; braucht Releases in `KERSEX/KERJAMI_Launcher` |
 | 7 | UI-Fertigstellung | offen |
@@ -279,7 +330,7 @@ Offene Entscheidungen stehen in [03-entscheidungen.md](03-entscheidungen.md):
 - E-01 Compiler und Qt-Variante (auch wegen der Qt-Lizenz, E-06)
 - E-02 Testprojekt mit ZIP-Releases für den Test in Phase 4
 - E-03 Registry-Repository (Name, Datei im Repository oder Release-Asset)
-- E-04 ZIP-Bibliothek, E-05 Theme-Auswahl, E-06 Umfang der GitHub-Veröffentlichung
+- E-05 Theme-Auswahl, E-06 Umfang der GitHub-Veröffentlichung
 
 Die Reihenfolge der Phasen steht fest. Phase 2 und 3 laufen gegen einen lokalen Testserver und
 hängen von keiner dieser Entscheidungen ab.

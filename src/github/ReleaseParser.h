@@ -44,6 +44,18 @@ const Release* latest(const QList<Release>& releases);
 /// upper and lower case are not told apart.
 QList<ReleaseAsset> matchingAssets(const Release& release, const QString& pattern);
 
+/// The largest checksum file the launcher reads.
+inline constexpr qint64 kMaxChecksumFileBytes = 64 * 1024;
+
+/// The checksum file of the release that belongs to @p asset, or nullptr.
+///
+/// Looked for by exact name (case ignored): first a file of its own,
+/// "<asset>.sha256" or "<asset>.sha256sum", then a combined list "SHA256SUMS"
+/// or "SHA256SUMS.txt". If a group holds more than one candidate nothing is
+/// chosen: a launcher that guesses which checksum is meant verifies nothing.
+/// @p bareHashAllowed tells whether the file is of the first kind.
+const ReleaseAsset* checksumAsset(const Release& release, const ReleaseAsset& asset, bool* bareHashAllowed);
+
 /// A plain file name that is safe to create on Windows: no path, no reserved
 /// device name, at most 128 characters.
 bool isValidAssetFileName(const QString& name);
