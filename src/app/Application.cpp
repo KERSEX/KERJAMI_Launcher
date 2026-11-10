@@ -7,14 +7,19 @@
 #include "downloads/DownloadManager.h"
 #include "github/GitHubClient.h"
 #include "github/RegistryManager.h"
+#include "github/RegistryParser.h"
 #include "github/ReleaseManager.h"
+#include "installer/FileOps.h"
 #include "installer/InstallService.h"
 #include "installer/InstalledProjects.h"
 #include "installer/Installer.h"
 #include "installer/LibraryLayout.h"
 #include "installer/Uninstaller.h"
+#include "process/ProcessManager.h"
+#include "ui/AppContext.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
+#include "updater/ProjectUpdateManager.h"
 
 #include <QDir>
 #include <QLockFile>
@@ -127,6 +132,16 @@ int Application::run()
     if (const int removed = layout.cleanupTemp(); removed > 0)
         qCInfo(lcApp) << "Removed" << removed << "leftover folder(s) from temp";
 
+    // Archives an earlier run left in downloads/ (a crash, or an update that
+    // was waiting for a project to close) are not picked up again: the next
+    // update downloads and verifies them anew. Only folders named like a
+    // project are touched.
+    const QDir downloadFolders(paths.downloadsDir());
+    for (const QString& name : downloadFolders.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (RegistryParser::isValidProjectId(name))
+            FileOps::removeTree(downloadFolders.filePath(name));
+    }
+
     InstalledProjects installed(paths.stateFile());
     const InstalledProjects::LoadResult installedResult = installed.load();
 
@@ -136,8 +151,21 @@ int Application::run()
     Uninstaller uninstaller(layout, installed);
     InstallService installService(client, releases, downloads, installer, uninstaller, installed, layout);
 
-    ui::MainWindow window(paths, settings, registry, downloads, installService, installed);
+    // A project counts as running while a program of it is alive. An update, a
+    // removal or a second start must not touch such a project.
+    ProcessManager processes(layout, installed);
+    const auto isRunning = [&processes](const QString& id) { return processes.isRunningNow(id); };
+    installer.setRunningCheck(isRunning);
+    uninstaller.setRunningCheck(isRunning);
+    installService.setStarter([&processes](const QString& id) { return processes.start(id); });
+
+    ProjectUpdateManager updates(client, registry, releases, installService, processes, installed, settings);
+
+    ui::AppContext context {
+        paths, settings, registry, downloads, installed, installService, processes, updates};
+    ui::MainWindow window(context);
     window.show();
+    updates.start();
 
     if (settings.settings().registryAutoCheck)
         registry.refresh();

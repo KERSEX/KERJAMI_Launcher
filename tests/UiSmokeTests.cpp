@@ -4,6 +4,7 @@
 // If LAUNCHER_TEST_SCREENSHOT_DIR is set (CTest sets it), a screenshot of every
 // page is saved there for visual review.
 
+#include "SleepyProject.h"
 #include "TestHttpServer.h"
 #include "app/Branding.h"
 #include "core/PathManager.h"
@@ -17,10 +18,13 @@
 #include "installer/Installer.h"
 #include "installer/LibraryLayout.h"
 #include "installer/Uninstaller.h"
+#include "process/ProcessManager.h"
+#include "ui/AppContext.h"
 #include "ui/Dialogs.h"
 #include "ui/MainWindow.h"
 #include "ui/ProjectCard.h"
 #include "ui/Theme.h"
+#include "updater/ProjectUpdateManager.h"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -139,6 +143,9 @@ private slots:
     void cardShowsAnInstalledProject();
     void cardAsksBeforeUninstalling();
     void cardShowsWhyInstallingFailed();
+    void cardAnnouncesAnUpdateAndAsksBeforeStarting();
+    void cardLetsTheUserChooseTheUpdateMode();
+    void cardShowsARunningProjectAndAnUnexpectedEnd();
 
     void downloadsPageStartsEmpty();
     void downloadsPageShowsProgressAndCancels();
@@ -146,6 +153,12 @@ private slots:
     void downloadsPageClearsTheHistory();
 
 private:
+    launcher::ui::AppContext context()
+    {
+        return {*m_paths, *m_settings, *m_registry, *m_downloads, *m_installed, *m_service, *m_processes,
+            *m_updates};
+    }
+
     launcher::DownloadRequest downloadRequest(
         const QString& path, const QString& fileName, qint64 size, const QString& title) const
     {
@@ -206,6 +219,9 @@ private:
     std::unique_ptr<launcher::Installer> m_installer;
     std::unique_ptr<launcher::Uninstaller> m_uninstaller;
     std::unique_ptr<launcher::InstallService> m_service;
+    std::unique_ptr<launcher::ProcessManager> m_processes;
+    std::unique_ptr<launcher::ProjectUpdateManager> m_updates;
+    QByteArray m_releaseBody; ///< What the test server answers to a release list request.
 };
 
 void UiSmokeTests::initTestCase()
@@ -233,8 +249,14 @@ void UiSmokeTests::init()
     m_downloads->setFetchOptions(quick);
 
     // "/slow" delivers a third of the file and then stalls, "/missing" is gone, anything else is small.
-    m_server = std::make_unique<TestHttpServer>([](const TestHttpServer::Request& request) {
+    m_releaseBody.clear();
+    m_server = std::make_unique<TestHttpServer>([this](const TestHttpServer::Request& request) {
         TestHttpServer::Response response;
+        // A test that wants a release list sets m_releaseBody; without one the answer is no JSON.
+        if (!m_releaseBody.isEmpty() && request.path.startsWith(u"/repos/"_s)) {
+            response.body = m_releaseBody;
+            return response;
+        }
         if (request.path == u"/missing"_s) {
             response.status = 404;
             response.body = "Not Found";
@@ -260,10 +282,20 @@ void UiSmokeTests::init()
     m_uninstaller = std::make_unique<launcher::Uninstaller>(*m_layout, *m_installed);
     m_service = std::make_unique<launcher::InstallService>(
         *m_client, *m_releases, *m_downloads, *m_installer, *m_uninstaller, *m_installed, *m_layout);
+    m_processes = std::make_unique<launcher::ProcessManager>(*m_layout, *m_installed);
+    m_processes->setPolling(false); // the tests decide when to look
+    // As in the application: projects are started and checked through the process manager.
+    m_service->setStarter([this](const QString& id) { return m_processes->start(id); });
+    m_installer->setRunningCheck([this](const QString& id) { return m_processes->isRunningNow(id); });
+    m_uninstaller->setRunningCheck([this](const QString& id) { return m_processes->isRunningNow(id); });
+    m_updates = std::make_unique<launcher::ProjectUpdateManager>(
+        *m_client, *m_registry, *m_releases, *m_service, *m_processes, *m_installed, *m_settings);
 }
 
 void UiSmokeTests::cleanup()
 {
+    m_updates.reset();
+    m_processes.reset();
     m_service.reset();
     m_uninstaller.reset();
     m_installer.reset();
@@ -291,7 +323,7 @@ void UiSmokeTests::styleSheetIsLoadedWithAllTokensResolved()
 
 void UiSmokeTests::startsOnDashboard()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     QCOMPARE(window.currentPage(), PageId::Dashboard);
     QVERIFY(find<QAbstractButton>(window, "NavDashboard")->isChecked());
     QVERIFY(!find<QAbstractButton>(window, "NavLibrary")->isChecked());
@@ -301,7 +333,7 @@ void UiSmokeTests::startPageSettingIsRespected()
 {
     QVERIFY(m_settings->setStartPage(StartPage::Library));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     QCOMPARE(window.currentPage(), PageId::Library);
     QVERIFY(find<QAbstractButton>(window, "NavLibrary")->isChecked());
     QVERIFY(!find<QAbstractButton>(window, "NavDashboard")->isChecked());
@@ -309,7 +341,7 @@ void UiSmokeTests::startPageSettingIsRespected()
 
 void UiSmokeTests::sidebarSwitchesPages()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -333,7 +365,7 @@ void UiSmokeTests::sidebarSwitchesPages()
 
 void UiSmokeTests::dashboardLinksToLibrary()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -346,7 +378,7 @@ void UiSmokeTests::dashboardLinksToLibrary()
 
 void UiSmokeTests::brandingComesFromConfiguration()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     QCOMPARE(window.windowTitle(), launcher::branding::displayName());
     QCOMPARE(find<QLabel>(window, "BrandName")->text(), launcher::branding::productName());
     QVERIFY(find<QLabel>(window, "SidebarVersion")->text().contains(launcher::branding::version()));
@@ -378,7 +410,7 @@ void UiSmokeTests::brandImagesAreEmbedded()
     }
 
     // The sidebar and the dashboard actually show the images.
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     QVERIFY(!find<QLabel>(window, "BrandEmblem")->pixmap().isNull());
     QVERIFY(!find<QLabel>(window, "WelcomeLogo")->pixmap().isNull());
     QVERIFY(!window.windowIcon().isNull());
@@ -390,7 +422,7 @@ void UiSmokeTests::settingsControlsShowStoredValues()
     QVERIFY(m_settings->setUpdateCheckIntervalMinutes(360));
     QVERIFY(m_settings->setStartPage(StartPage::Library));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     QVERIFY(!find<QAbstractButton>(window, "RegistryAutoCheck")->isChecked());
     QVERIFY(find<QAbstractButton>(window, "LauncherUpdateAutoCheck")->isChecked());
     QCOMPARE(find<QComboBox>(window, "CheckInterval")->currentData().toInt(), 360);
@@ -401,7 +433,7 @@ void UiSmokeTests::settingsControlsShowStoredValues()
 
 void UiSmokeTests::settingsControlsPersistChanges()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Settings);
@@ -435,7 +467,7 @@ void UiSmokeTests::settingsControlsPersistChanges()
 
 void UiSmokeTests::rendersEveryPage()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -477,7 +509,7 @@ void UiSmokeTests::rendersEveryPage()
 
 void UiSmokeTests::libraryExplainsThatNothingWasLoaded()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -494,7 +526,7 @@ void UiSmokeTests::libraryShowsProjectsFromTheCache()
     m_registry->loadCache();
     QCOMPARE(m_registry->projects().size(), 4);
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -528,7 +560,7 @@ void UiSmokeTests::libraryFiltersCombine()
 {
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -579,7 +611,7 @@ void UiSmokeTests::libraryKeepsTheStoredListWhenRefreshFails()
 {
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -598,7 +630,7 @@ void UiSmokeTests::libraryKeepsTheStoredListWhenRefreshFails()
 
 void UiSmokeTests::libraryShowsAnErrorWithoutAStoredList()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -624,7 +656,7 @@ void UiSmokeTests::libraryShowsAnErrorWithoutAStoredList()
 
 void UiSmokeTests::libraryRefreshButtonShowsLoadingState()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -645,7 +677,7 @@ void UiSmokeTests::libraryRefreshButtonShowsLoadingState()
 
 void UiSmokeTests::downloadsPageStartsEmpty()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Downloads);
@@ -656,7 +688,7 @@ void UiSmokeTests::downloadsPageStartsEmpty()
 
 void UiSmokeTests::downloadsPageShowsProgressAndCancels()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Downloads);
@@ -693,7 +725,7 @@ void UiSmokeTests::downloadsPageShowsProgressAndCancels()
 
 void UiSmokeTests::downloadsPageShowsFinishedAndFailedDownloads()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Downloads);
@@ -724,7 +756,7 @@ void UiSmokeTests::downloadsPageShowsFinishedAndFailedDownloads()
 
 void UiSmokeTests::downloadsPageClearsTheHistory()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Downloads);
@@ -780,7 +812,7 @@ void UiSmokeTests::cardOffersInstallationForANewProject()
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -803,7 +835,7 @@ void UiSmokeTests::cardShowsAnInstalledProject()
     m_registry->loadCache();
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -834,7 +866,7 @@ void UiSmokeTests::cardAsksBeforeUninstalling()
     m_registry->loadCache();
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -875,7 +907,7 @@ void UiSmokeTests::cardShowsWhyInstallingFailed()
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
 
-    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads, *m_service, *m_installed);
+    MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -905,6 +937,190 @@ void UiSmokeTests::cardShowsWhyInstallingFailed()
     primary->click();
     QVERIFY(!problem->isVisible());
     QVERIFY(finished.wait(10000));
+}
+
+// ---- Updates and running projects on the card -----------------------------------------
+
+namespace {
+
+/// A release list with one stable release of the given version and a digest that does not fit any file.
+QByteArray releaseListFor(const QString& version, const QString& notes)
+{
+    const QJsonObject asset {{u"name"_s, u"lap-timer-Windows-x64.zip"_s}, {u"size"_s, 123456},
+        {u"state"_s, u"uploaded"_s}, {u"digest"_s, u"sha256:"_s + u"a"_s.repeated(64)}};
+    const QJsonObject release {{u"tag_name"_s, u"v"_s + version}, {u"name"_s, u"Release"_s},
+        {u"body"_s, notes}, {u"draft"_s, false}, {u"prerelease"_s, false},
+        {u"published_at"_s, u"2026-11-01T12:00:00Z"_s}, {u"assets"_s, QJsonArray {asset}}};
+    return QJsonDocument(QJsonArray {release}).toJson();
+}
+
+} // namespace
+
+void UiSmokeTests::cardAnnouncesAnUpdateAndAsksBeforeStarting()
+{
+    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
+    m_registry->loadCache();
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues Fahrzeugmodell\n- Fehler behoben"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    ProjectCard* card = nullptr;
+    for (ProjectCard* candidate : window.findChildren<ProjectCard*>()) {
+        if (candidate->projectId() == u"lap-timer"_s)
+            card = candidate;
+    }
+    QVERIFY(card);
+    auto* badge = findIn<QLabel>(*card, "ProjectUpdateBadge");
+    auto* update = findIn<QPushButton>(*card, "ProjectUpdate");
+    auto* primary = findIn<QPushButton>(*card, "ProjectPrimary");
+
+    // Before a check there is nothing to announce.
+    QVERIFY(!badge->isVisible());
+    QVERIFY(!update->isVisible());
+
+    QSignalSpy checked(m_updates.get(), &launcher::ProjectUpdateManager::checkFinished);
+    m_updates->checkAll();
+    QVERIFY(checked.wait(10000));
+
+    QVERIFY(badge->isVisible());
+    QCOMPARE(badge->text(), u"Update 2.0.0"_s);
+    QVERIFY(update->isVisible());
+    QCOMPARE(update->text(), u"Aktualisieren"_s);
+    QCOMPARE(primary->text(), u"Starten"_s);
+    QVERIFY(findIn<QLabel>(*card, "ProjectState")->text().contains(u"1.4.2"_s));
+    saveScreenshot(window, u"library-update-available"_s);
+
+    // The user is asked, and sees the version and the changelog. "No" changes nothing.
+    QString seenVersion;
+    QString seenNotes;
+    launcher::ui::Dialogs::setUpdateConfirmationForTests(
+        [&](const launcher::Project&, const launcher::UpdateInfo& info) {
+            seenVersion = info.latestVersion;
+            seenNotes = info.notes;
+            return false;
+        });
+    update->click();
+    QCOMPARE(seenVersion, u"2.0.0"_s);
+    QVERIFY(seenNotes.contains(u"Neues Fahrzeugmodell"_s));
+    QCOMPARE(m_updates->info(u"lap-timer"_s).state, launcher::UpdateState::Available);
+    QVERIFY(m_updates->active().isEmpty());
+
+    // "Yes" starts the update: the card shows the work and offers to cancel it.
+    launcher::ui::Dialogs::setUpdateConfirmationForTests(
+        [](const launcher::Project&, const launcher::UpdateInfo&) { return true; });
+    update->click();
+    launcher::ui::Dialogs::setUpdateConfirmationForTests({});
+    QVERIFY(m_updates->info(u"lap-timer"_s).state != launcher::UpdateState::Available);
+    QCOMPARE(primary->text(), u"Abbrechen"_s);
+    QVERIFY(!update->isVisible());
+
+    // Cancelling brings the announcement back; nothing was installed.
+    primary->click();
+    QTRY_COMPARE_WITH_TIMEOUT(m_updates->info(u"lap-timer"_s).state, launcher::UpdateState::Available, 10000);
+    QCOMPARE(primary->text(), u"Starten"_s);
+    QVERIFY(update->isVisible());
+    QCOMPARE(m_installed->get(u"lap-timer"_s)->version, u"1.4.2"_s);
+}
+
+void UiSmokeTests::cardLetsTheUserChooseTheUpdateMode()
+{
+    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
+    m_registry->loadCache();
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    ProjectCard* installedCard = nullptr;
+    ProjectCard* freshCard = nullptr;
+    for (ProjectCard* card : window.findChildren<ProjectCard*>())
+        (card->projectId() == u"lap-timer"_s ? installedCard : freshCard) = card;
+    QVERIFY(installedCard && freshCard);
+
+    // Only an installed project has the choice, and every project starts as manual.
+    auto* mode = findIn<launcher::ui::ComboBox>(*installedCard, "ProjectUpdateMode");
+    QVERIFY(mode->isVisible());
+    QCOMPARE(mode->currentText(), u"Updates: Manuell"_s);
+    QVERIFY(!findIn<launcher::ui::ComboBox>(*freshCard, "ProjectUpdateMode")->isVisible());
+
+    choose(mode, u"Updates: Automatisch"_s);
+    QCOMPARE(m_settings->updateMode(u"lap-timer"_s), launcher::UpdateMode::Automatic);
+    QCOMPARE(m_settings->updateMode(freshCard->projectId()), launcher::UpdateMode::Manual);
+
+    // The choice is stored and shown again by a new window.
+    MainWindow other(context());
+    other.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&other));
+    other.showPage(PageId::Library);
+    QTest::qWait(250);
+    for (ProjectCard* card : other.findChildren<ProjectCard*>()) {
+        if (card->projectId() == u"lap-timer"_s)
+            QCOMPARE(findIn<launcher::ui::ComboBox>(*card, "ProjectUpdateMode")->currentText(),
+                u"Updates: Automatisch"_s);
+    }
+
+    // A change made elsewhere shows on the card without rebuilding the page.
+    QVERIFY(m_settings->setUpdateMode(u"lap-timer"_s, launcher::UpdateMode::Manual));
+    QCOMPARE(mode->currentText(), u"Updates: Manuell"_s);
+}
+
+void UiSmokeTests::cardShowsARunningProjectAndAnUnexpectedEnd()
+{
+    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
+    m_registry->loadCache();
+    QVERIFY(sleepy::install(
+        *m_layout, *m_installed, u"lap-timer"_s, u"lap-timer"_s, u"1.4.2"_s, u"lap-timer.exe"_s));
+    const QString current = m_layout->currentDir(u"lap-timer"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    ProjectCard* card = nullptr;
+    for (ProjectCard* candidate : window.findChildren<ProjectCard*>()) {
+        if (candidate->projectId() == u"lap-timer"_s)
+            card = candidate;
+    }
+    QVERIFY(card);
+    auto* primary = findIn<QPushButton>(*card, "ProjectPrimary");
+    auto* uninstall = findIn<QPushButton>(*card, "ProjectUninstall");
+    auto* problem = findIn<QLabel>(*card, "ProjectProblem");
+    QCOMPARE(primary->text(), u"Starten"_s);
+
+    // The program ends at once with an error code: the user is told.
+    sleepy::writeControlFile(current, u"exitcode"_s, "3");
+    sleepy::stop(current);
+    primary->click();
+    QTRY_VERIFY_WITH_TIMEOUT((m_processes->refresh(), problem->isVisible()), 10000);
+    QVERIFY2(problem->text().contains(u"0x3"_s), qPrintable(problem->text()));
+    QTRY_COMPARE_WITH_TIMEOUT((m_processes->refresh(), primary->text()), u"Starten"_s, 10000);
+
+    // Starting again clears the old message. This time the program stays alive.
+    QFile::remove(current + u"/stop"_s);
+    QFile::remove(current + u"/exitcode"_s);
+    primary->click();
+    QCOMPARE(m_service->lastFailure(u"lap-timer"_s).kind, launcher::OperationFailure::Kind::None);
+    QVERIFY(!problem->isVisible());
+    QCOMPARE(primary->text(), u"Läuft"_s);
+    QVERIFY(!primary->isEnabled());   // no second start
+    QVERIFY(!uninstall->isVisible()); // and no removal while it runs
+    QVERIFY(findIn<QLabel>(*card, "ProjectState")->text().contains(u"läuft"_s));
+    saveScreenshot(window, u"library-running"_s);
+
+    sleepy::stop(current);
+    QTRY_COMPARE_WITH_TIMEOUT((m_processes->refresh(), primary->text()), u"Starten"_s, 10000);
+    QVERIFY(primary->isEnabled());
+    QVERIFY(uninstall->isVisible());
 }
 
 QTEST_MAIN(UiSmokeTests)

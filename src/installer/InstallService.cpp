@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QThread>
 
 using namespace Qt::StringLiterals;
 
@@ -23,6 +24,7 @@ InstallService::InstallService(GitHubClient& client, ReleaseManager& releases, D
     , m_uninstaller(uninstaller)
     , m_installed(installed)
     , m_layout(layout)
+    , m_starter([this](const QString& id) { return startProject(m_layout, m_installed, id); })
 {
     connect(&m_releases, &ReleaseManager::releaseReady, this, &InstallService::onReleaseReady);
     connect(&m_releases, &ReleaseManager::fetchFailed, this, &InstallService::onReleaseFailed);
@@ -35,6 +37,19 @@ InstallService::InstallService(GitHubClient& client, ReleaseManager& releases, D
     connect(&m_installer, &Installer::progress, this, &InstallService::onInstallerProgress);
     connect(&m_installer, &Installer::installed, this, [this](const QString& id) { onInstalled(id); });
     connect(&m_installer, &Installer::failed, this, &InstallService::onInstallFailed);
+}
+
+InstallService::~InstallService()
+{
+    // A verification in the background is stopped at the next block and waited for.
+    for (Session& session : m_sessions) {
+        if (session.verifyCancel)
+            *session.verifyCancel = true;
+    }
+    for (QThread* thread : std::as_const(m_verifiers)) {
+        thread->wait();
+        delete thread;
+    }
 }
 
 ProjectStatus InstallService::status(const QString& projectId) const
@@ -76,7 +91,7 @@ void InstallService::setStage(Session& session, ProjectStatus::Stage stage, qint
 
 // ---- install ---------------------------------------------------------------------
 
-void InstallService::install(const Project& project)
+void InstallService::install(const Project& project, Mode mode)
 {
     const QString id = project.id;
     if (m_sessions.contains(id) || m_installer.isBusy(id))
@@ -85,6 +100,7 @@ void InstallService::install(const Project& project)
     m_failures.remove(id);
     Session fresh;
     fresh.project = project;
+    fresh.mode = mode;
     fresh.status.stage = ProjectStatus::Stage::FetchingRelease;
     m_sessions.insert(id, fresh);
     emit statusChanged(id);
@@ -238,17 +254,102 @@ void InstallService::onDownloadFinished(quint64 downloadId)
     if (!download)
         return;
 
-    const QString projectId = current->project.id;
     current->archivePath = download->filePath;
     setStage(*current, ProjectStatus::Stage::Verifying, 0, download->bytesReceived);
 
+    // To install at once, the installer verifies the hash itself. To wait for
+    // the project to close, the archive is verified now, so that a bad file is
+    // found (and discarded) when it arrives, not hours later.
+    if (current->mode == Mode::PrepareOnly)
+        startEarlyVerification(*current);
+    else
+        startInstaller(*current);
+}
+
+void InstallService::startInstaller(Session& current)
+{
     InstallRequest request;
-    request.project = current->project;
-    request.version = current->selection->release.version.toString();
-    request.tag = current->selection->release.tag;
-    request.archivePath = download->filePath;
-    request.sha256 = current->expectedSha256;
+    request.project = current.project;
+    request.version = current.selection->release.version.toString();
+    request.tag = current.selection->release.tag;
+    request.archivePath = current.archivePath;
+    request.sha256 = current.expectedSha256;
     m_installer.install(request);
+}
+
+void InstallService::startEarlyVerification(Session& current)
+{
+    const QString id = current.project.id;
+    const QString path = current.archivePath;
+    const QString expected = current.expectedSha256;
+    const qint64 total = QFileInfo(path).size();
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    current.verifyCancel = cancel;
+
+    QThread* thread = QThread::create([this, id, path, expected, total, cancel] {
+        const HashVerifier::VerifyResult result =
+            HashVerifier::verifySha256(path, expected, cancel.get(), [this, id, total](qint64 done) {
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, id, done, total] {
+                        Session* current = session(id);
+                        if (current && current->verifyCancel && done < total) {
+                            current->status.done = done;
+                            current->status.total = total;
+                            emit statusChanged(id);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            });
+        const int status = static_cast<int>(result.status);
+        QMetaObject::invokeMethod(
+            this, [this, id, status, detail = result.detail] { onEarlyVerified(id, status, detail); },
+            Qt::QueuedConnection);
+    });
+    m_verifiers.append(thread);
+    connect(thread, &QThread::finished, this, [this, thread] {
+        m_verifiers.removeOne(thread);
+        thread->deleteLater();
+    });
+    thread->start();
+}
+
+void InstallService::onEarlyVerified(const QString& projectId, int status, const QString& detail)
+{
+    Session* current = session(projectId);
+    if (!current || !current->verifyCancel)
+        return; // cancelled in the meantime
+    current->verifyCancel.reset();
+
+    const auto result = static_cast<HashVerifier::Status>(status);
+    if (result == HashVerifier::Status::Match) {
+        setStage(*current, ProjectStatus::Stage::Prepared);
+        qCInfo(lcInstall).noquote() << "Update of" << projectId << "is prepared";
+        emit prepared(projectId);
+        return;
+    }
+    if (result == HashVerifier::Status::Cancelled) {
+        finishCancelled(projectId);
+        return;
+    }
+
+    OperationFailure failure;
+    failure.kind = OperationFailure::Kind::Install;
+    failure.code = static_cast<int>(result == HashVerifier::Status::Mismatch ? InstallError::HashMismatch
+            : result == HashVerifier::Status::FileError                      ? InstallError::ArchiveUnreadable
+                                                                             : InstallError::NoTrustedHash);
+    failure.detail = detail;
+    fail(projectId, failure);
+}
+
+void InstallService::installPrepared(const QString& projectId)
+{
+    Session* current = session(projectId);
+    if (!current || current->status.stage != ProjectStatus::Stage::Prepared)
+        return;
+    qCInfo(lcInstall).noquote() << "Installing the prepared update of" << projectId;
+    setStage(*current, ProjectStatus::Stage::Verifying, 0, QFileInfo(current->archivePath).size());
+    startInstaller(*current);
 }
 
 void InstallService::onDownloadFailed(quint64 downloadId)
@@ -345,7 +446,13 @@ void InstallService::cancel(const QString& projectId)
         break;
     case ProjectStatus::Stage::Verifying:
     case ProjectStatus::Stage::Extracting:
-        m_installer.cancel(projectId); // reports back through onInstallFailed()
+        if (current->verifyCancel)
+            *current->verifyCancel = true; // the early verification reports back through onEarlyVerified()
+        else
+            m_installer.cancel(projectId); // reports back through onInstallFailed()
+        break;
+    case ProjectStatus::Stage::Prepared:
+        finishCancelled(projectId); // removes the archive
         break;
     case ProjectStatus::Stage::Replacing:
         break; // too late: the installed version is being replaced
@@ -423,7 +530,7 @@ StartResult InstallService::start(const QString& projectId)
         result.error = StartError::Busy;
         result.detail = u"an installation is running"_s;
     } else {
-        result = startProject(m_layout, m_installed, projectId);
+        result = m_starter(projectId);
     }
 
     if (result.ok()) {

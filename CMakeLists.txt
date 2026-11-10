@@ -99,15 +99,20 @@ qt_add_library(launcher_core STATIC
     src/installer/Uninstaller.cpp
     src/installer/Uninstaller.h
     src/models/Download.h
+    src/models/ProjectSettings.h
     src/models/LauncherSettings.h
     src/models/Project.h
     src/models/Release.h
+    src/process/ProcessManager.cpp
+    src/process/ProcessManager.h
     src/security/ArchiveValidator.cpp
     src/security/ArchiveValidator.h
     src/security/HashVerifier.cpp
     src/security/HashVerifier.h
     src/security/ZipArchive.cpp
     src/security/ZipArchive.h
+    src/updater/ProjectUpdateManager.cpp
+    src/updater/ProjectUpdateManager.h
 )
 target_include_directories(launcher_core
     PUBLIC src

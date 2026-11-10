@@ -510,8 +510,9 @@ prüfen → **erst jetzt** die installierte Version nach `backups/<Version>/` ve
 - **Heruntergeladene Datei:** Nach jedem Versuch, gelungen oder nicht, löscht der Dienst das ZIP aus
   `downloads/`. Ein neuer Versuch lädt es neu. So wächst der portable Ordner nicht (USB-Stick), und
   eine geprüfte Datei bleibt nirgends liegen, der später ein anderer Hash zugeordnet werden könnte.
-  Phase 5 (vorgemerkte Updates) braucht die Datei über das Schließen des Projekts hinweg und
-  ändert das für diesen Fall.
+  Ausnahme: Ein vorgemerktes Update (D-37) behält seine geprüfte Datei, solange es auf das Ende des
+  Projekts wartet. Was beim Beenden des Launchers noch in `downloads/<Projekt>/` liegt, löscht der
+  nächste Start.
 - Beim Start entfernt der Launcher übrig gebliebene `staging-*` und `uninstall-*` aus `temp/`
   (Absturz, Stromausfall). Die Instanz-Sperre stellt sicher, dass kein anderer Installer läuft.
 
@@ -547,12 +548,13 @@ prüfen → **erst jetzt** die installierte Version nach `backups/<Version>/` ve
   dass es nicht rückgängig zu machen ist. Downloads, Einstellungen und andere Projekte bleiben.
 - Fehlt der Ordner schon (von Hand gelöscht), wird nur der Eintrag entfernt.
 
-### D-33 Start eines Projekts (vorläufig)
+### D-33 Start eines Projekts
 
 Gestartet wird nur die Startdatei aus dem Eintrag, aus `current/` des Projekts, ohne Verknüpfung im
-Weg, mit `current/` als Arbeitsordner und losgelöst vom Launcher (`startDetached`): Das Projekt läuft
-weiter, wenn der Launcher geschlossen wird. Die Prozessüberwachung (läuft es? wann endet es?)
-kommt in Phase 5 mit dem `ProcessManager`.
+Weg, mit `current/` als Arbeitsordner. Das Projekt läuft weiter, wenn der Launcher geschlossen
+wird. Die Prüfung steht in `resolveStartTarget`. Seit Phase 5 startet der `ProcessManager` (D-35)
+und kennt den Prozess danach; `startProject` (`QProcess::startDetached`, ohne Überwachung) bleibt
+als einfacher Weg für Tests und Werkzeuge.
 
 ### D-34 Ablauf für den Nutzer: `InstallService` und Projektkarte
 
@@ -567,9 +569,113 @@ kommt in Phase 5 mit dem `ProcessManager`.
 - Abbrechen ist kein Fehler (keine rote Meldung). Während der Austausch läuft, ist der Knopf
   gesperrt.
 - Deinstallieren fragt immer nach. Installieren nicht: Der Klick ist die Bestätigung. Die
-  Bestätigung vor einer Aktualisierung (Modus „manuell“) kommt mit Phase 5.
-- Der Dienst nutzt „Installieren“ auch zum Ersetzen der installierten Version; Phase 5 ruft für
-  Updates dieselbe Kette auf.
+  Bestätigung vor einer Aktualisierung steht in D-36.
+- Der Dienst nutzt „Installieren“ auch zum Ersetzen der installierten Version; die Updates (D-36)
+  rufen dieselbe Kette auf, im Modus „nur vorbereiten“ (D-37).
+
+### D-35 Prozessüberwachung (`ProcessManager`)
+
+- **Ein Projekt läuft,** wenn (a) ein vom Launcher gestartetes Programm dieses Projekts lebt, samt
+  allem, was es selbst gestartet hat, oder (b) irgendein Prozess auf dem Rechner seine Programmdatei
+  im `current/`-Ordner des Projekts hat. (a) trifft auch Hilfsprogramme, die woanders liegen. (b) trifft
+  ein Projekt, das aus dem Explorer, über eine Verknüpfung oder von einem früheren Launcher-Lauf
+  gestartet wurde. Deshalb gilt ein Projekt nie als geschlossen, nur weil das Launcher-Fenster zu ist.
+- **Technik:** Der Start erzeugt den Prozess angehalten, steckt ihn in ein Job-Objekt (Windows führt
+  darin die ganze Nachkommenschaft) und setzt ihn dann fort. `BREAKAWAY_OK` ist gesetzt, damit
+  Programme, die sich absichtlich aus einem Job lösen (manche Updater), nicht scheitern; diese
+  Nachkommen findet dann (b). Das Job-Objekt beendet nichts, wenn der Launcher schließt. (b) liest über
+  `QueryFullProcessImageName` die Programmdatei aller Prozesse, die der Benutzer lesen darf.
+  Verglichen wird auf den Ordner genau (`Tool/current/` trifft `Tool/current-old/` nicht), ohne
+  Groß-/Kleinschreibung und mit aufgelösten Kurznamen (8.3).
+- **Zwei Fragen:** `isRunning` antwortet aus dem Stand der letzten Abfrage (alle 2 Sekunden) für die
+  Oberfläche. `isRunningNow` fragt sofort und ist aus jedem Thread erlaubt. Jede Entscheidung, die
+  etwas verändert (Installation, Deinstallation, Update, zweiter Start), nutzt `isRunningNow`.
+- **Mehrfachstart** wird abgelehnt (`AlreadyRunning`), auch wenn das erste Programm von außen
+  gestartet wurde. Die Karte zeigt „Läuft“ und sperrt „Starten“ und „Deinstallieren“.
+- **Unerwartetes Ende:** Beim vom Launcher gestarteten Programm kennt der Manager den Exitcode. Als
+  unerwartet gilt ein Absturzcode (Windows setzt dafür die oberen Bits, ab `0xC0000000`) oder ein
+  Fehlercode innerhalb von zehn Sekunden nach dem Start. Ein Fehlercode nach langer Laufzeit ist
+  üblich und kein Grund zur Meldung. Die Karte zeigt die Meldung bis zum nächsten Start.
+- **Grenzen, bewusst:**
+  - Ein Hilfsprogramm, das außerhalb von `current/` liegt und von einem Programm gestartet wurde,
+    das nicht der Launcher gestartet hat, bleibt unsichtbar.
+  - Programme, die ein Starter über den Explorer („start“, ShellExecute) hochzieht, hängen nicht
+    am Job; (b) sieht sie nur, wenn ihre Datei in `current/` liegt.
+  - Prozesse, deren Programmdatei dieser Benutzer nicht lesen darf, sind unsichtbar.
+  - Das letzte Netz bleibt die Dateisperre des Installers: Ein Ordner mit laufendem Programm lässt
+    sich nicht ersetzen (D-30), die Aktualisierung scheitert dann mit klarer Meldung.
+  - Die Abfrage listet alle Prozesse. Das kostet auf einem normalen Rechner wenige Millisekunden.
+
+### D-36 Aktualisierung der Projekte (`ProjectUpdateManager`)
+
+- **Was geprüft wird:** Nur installierte Projekte, die noch in der Registry stehen. Eine Anfrage an
+  GitHub je Projekt, nacheinander. Nie wird ein Projekt installiert, weil es in der Registry auftaucht,
+  auch dann nicht, wenn für seine ID „automatisch“ eingetragen ist: Ohne Eintrag in der Liste der
+  Installationen passiert nichts.
+- **Wann:** Drei Sekunden nach dem Start und dann im eingestellten Intervall (mindestens 15 Minuten,
+  Voreinstellung 60). Ein Projekt wird höchstens einmal je Minute gefragt. Die Runde bricht ab, wenn GitHub
+  nicht erreichbar ist oder das Limit erschöpft meldet. Sie wird auch übersprungen, wenn weniger als 10
+  Anfragen plus eine je Projekt übrig sind (Limit: 60 pro Stunde ohne Anmeldung): Damit bleibt Platz,
+  um ein Projekt noch zu installieren.
+- **Version:** Ein Update ist ein echt größerer SemVer-Wert als die installierte Version. Gleich oder
+  kleiner ist „aktuell“, nie ein Downgrade.
+- **Netzwerkfehler:** Eine fehlgeschlagene Prüfung ändert den Stand nicht. Ein angekündigtes Update bleibt
+  angekündigt, ein unbekannter Stand bleibt unbekannt (nicht „aktuell“). `lastCheckFailed` markiert es.
+- **Zustände:** Unbekannt, Aktuell, Verfügbar, Wartet in der Warteschlange, Lädt, Prüft, Vorgemerkt
+  („Update Pending“), Installiert, Fehlgeschlagen.
+- **Manuell** (Voreinstellung für jedes Projekt): Die Karte zeigt „Update 2.0.0“ und „Aktualisieren“. Der
+  Klick öffnet eine Rückfrage mit Version und Changelog (den Release-Notes als Text). Erst nach „Aktualisieren“
+  wird geladen und installiert. Die Rückfrage deckt beides ab, was der Auftrag trennt („Download bewusst
+  starten“, „Installation nach Bestätigung“): Sie sagt, dass geladen, geprüft und installiert wird und
+  dass ein laufendes Projekt zuerst beendet sein muss.
+- **Automatisch:** Das Update wird ohne Rückfrage geladen, geprüft und installiert, sobald das Projekt
+  nicht läuft (D-37). Ein laufendes Projekt wird nie angefasst.
+- **Fehler:** Das Update scheitert an Hash, Archiv, Platz oder Austausch, die installierte Version bleibt
+  wie sie war (Rollback, D-30). Der Modus „automatisch“ versucht dieselbe Version nicht von allein erneut,
+  damit ein kaputtes Release nicht stündlich einen Download auslöst. Die Karte zeigt den Grund und „Erneut
+  versuchen“; eine neuere Version beginnt von vorn. Ausnahme: „Projekt in Benutzung“ ist nicht Schuld des
+  Releases, die nächste Runde versucht es wieder.
+- **Abbrechen** (Warteschlange, Download, Vormerkung) gilt als Entscheidung des Nutzers: Die Version bleibt
+  angekündigt, der Modus „automatisch“ startet sie nicht noch einmal von selbst. „Aktualisieren“ geht
+  jederzeit.
+- **Moduswechsel:** „Automatisch“ einschalten startet ein bekanntes Update sofort. „Manuell“
+  einschalten nimmt ein automatisch gestartetes Update zurück, das noch nicht mit dem Installieren
+  begonnen hat.
+- **Deinstallation** entfernt Zustand und Einstellung des Projekts (D-38).
+
+### D-37 Vorgemerkte Updates und Warteschlange
+
+- Ein Update läuft in zwei Schritten: Der Dienst lädt und prüft die Datei im Modus „nur vorbereiten“ (SHA-256
+  in einem Hintergrund-Thread, ein schlechter Fund erscheint also sofort und nicht Stunden später). Dann
+  entscheidet der Manager: Läuft das Projekt nicht, geht es sofort in den Installer. Läuft es, wird das
+  Update vorgemerkt (Pending), die geprüfte Datei bleibt liegen.
+- Sobald der ProcessManager „läuft nicht mehr“ meldet, fragt der Manager noch einmal frisch
+  (`isRunningNow`) und installiert dann. Der Installer prüft die Hash-Summe der Datei beim Entpacken
+  ein weiteres Mal (D-28).
+- **Warteschlange:** Höchstens zwei Updates laden und installieren gleichzeitig; weitere warten in der
+  Reihenfolge ihrer Erkennung („Wartet in der Warteschlange“). Das passt zu den zwei parallelen Downloads
+  der Download-Verwaltung (D-24).
+- **Nicht gespeichert:** Eine Vormerkung überlebt das Beenden des Launchers nicht. Sie wäre mit Datei,
+  Hash und Zustand auf der Platte nur mit viel Aufwand sicher, und das Ergebnis ist ohne sie dasselbe:
+  Im Modus „automatisch“ findet die nächste Prüfung das Update wieder, lädt es neu und installiert es,
+  sobald das Projekt nicht läuft. Im Modus „manuell“ erscheint die Ankündigung erneut. Übrig gebliebene
+  Dateien löscht der Start (D-30).
+- Das Projekt wird nach einem Update nicht neu gestartet.
+
+### D-38 Einstellungen pro Projekt
+
+- In `launcher/settings.json`: `"projects": {"<id>": {"update_mode": "manual" | "automatic"}}`.
+  Schema bleibt 1 (der Abschnitt ist neu und optional).
+- Jedes Projekt ist „manual“, bis der Nutzer etwas anderes wählt. Ein unbekannter oder beschädigter
+  Wert zählt als „manual“: Eine kaputte Datei schaltet nie Updates ein.
+- Der Eintrag gehört zur Projekt-ID und hängt weder von der installierten Version noch vom Inhalt der
+  Registry ab. Ein Projekt, das aus der Registry verschwindet und wiederkommt, behält seine Wahl.
+  Jede Änderung wird sofort gespeichert (D-08).
+- Ungültige IDs werden abgelehnt, höchstens 500 Einträge. Unbekannte Schlüssel in einem Eintrag und Einträge
+  mit IDs, die dieses Programm nicht annimmt, bleiben beim Speichern erhalten.
+- Beim Deinstallieren wird der Eintrag entfernt, ein leerer Abschnitt nicht mitgeschrieben.
+- Die Wahl steht auf der Projektkarte der Bibliothek („Updates: Manuell / Automatisch“), nur bei
+  installierten Projekten. Die Projekt-Detailseite folgt in Phase 7.
 
 ## Bekannte Grenzen
 
@@ -610,8 +716,15 @@ kommt in Phase 5 mit dem `ProcessManager`.
   EXE eines laufenden Programms und jede geöffnete Datei in `current/` verhindern das Umbenennen
   des Ordners. Das ist getestet (Datei ohne Löschfreigabe offen halten). Ein Programm, das aus
   `current/` gestartet wurde, hält immer seine EXE offen; die Sperre ist deshalb verlässlich, aber
-  eine Fehlermeldung „Datei in Benutzung“ kann auch ein Virenscanner auslösen. Phase 5 ergänzt die
-  Prozessüberwachung (`setRunningCheck`), die den Grund genauer nennen kann.
+  eine Fehlermeldung „Datei in Benutzung“ kann auch ein Virenscanner auslösen. Davor steht seit Phase
+  5 die Prozessüberwachung (D-35), die ein laufendes Projekt schon vorher erkennt und das Update
+  vormerkt, statt es scheitern zu lassen.
+- Die Update-Prüfung braucht eine API-Anfrage je installiertem Projekt und Runde. Mit vielen
+  installierten Projekten und dem kürzesten Intervall (15 Minuten) kommt man nahe an das Limit von 60
+  Anfragen pro Stunde; der Manager lässt dann Reserve (D-36), die Anzeige bleibt beim letzten Stand.
+- Die Release-Notes erscheinen als Rohtext (Markdown-Quelle) in der Rückfrage zur Aktualisierung, nicht
+  als formatierter Text. Eine Detailseite mit Darstellung folgt in Phase 7.
+- Nach einer Aktualisierung startet der Launcher das Projekt nicht neu, auch wenn es vorher lief.
 - Eine Aktualisierung ersetzt `current/` als Ganzes. Dateien, die ein Projekt zur Laufzeit in
   `current/` anlegt, liegen danach im Backup, nicht in der neuen Version (D-30).
 - Das ZIP muss die Startdatei am Pfad der Registry enthalten und darf kein ZIP64, keine

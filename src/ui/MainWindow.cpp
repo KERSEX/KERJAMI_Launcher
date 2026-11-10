@@ -29,10 +29,10 @@ constexpr int kFadeDurationMs = 140;
 
 } // namespace
 
-MainWindow::MainWindow(const PathManager& paths, SettingsManager& settings, RegistryManager& registry,
-    DownloadManager& downloads, InstallService& installService, InstalledProjects& installed, QWidget* parent)
+MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     : QMainWindow(parent)
 {
+    SettingsManager& settings = context.settings;
     setWindowTitle(branding::displayName());
     setWindowIcon(Theme::applicationIcon());
     setMinimumSize(960, 600);
@@ -48,9 +48,9 @@ MainWindow::MainWindow(const PathManager& paths, SettingsManager& settings, Regi
     // Order must match PageId.
     auto* dashboard = new DashboardPage(m_pages);
     m_pages->addWidget(dashboard);
-    m_pages->addWidget(new LibraryPage(registry, installService, installed, m_pages));
-    m_pages->addWidget(new DownloadsPage(downloads, m_pages));
-    m_pages->addWidget(new SettingsPage(paths, settings, m_pages));
+    m_pages->addWidget(new LibraryPage(context, m_pages));
+    m_pages->addWidget(new DownloadsPage(context.downloads, m_pages));
+    m_pages->addWidget(new SettingsPage(context.paths, settings, m_pages));
 
     layout->addWidget(createSidebar());
     layout->addWidget(m_pages, 1);

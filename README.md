@@ -14,13 +14,15 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Die Phasen 1 bis 4 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Die Phasen 1 bis 5 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
 Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die Projekt-Registry mit
 Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version, die
 Download-Warteschlange mit Fortschritt und die Installation: SHA-256-Prüfung, ZIP-Prüfung und
 sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden in
-der Bibliothek installiert, gestartet und entfernt. Automatische Updates der Projekte und das
-Selbstupdate des Launchers folgen. Details stehen in
+der Bibliothek installiert, gestartet und entfernt. Der Launcher erkennt laufende Projekte und
+prüft installierte Projekte auf neue Versionen: je Projekt manuell (Hinweis und Rückfrage) oder
+automatisch (wird installiert, sobald das Projekt geschlossen ist). Das Selbstupdate des Launchers
+folgt. Details stehen in
 [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 ## Bauen
@@ -51,7 +53,7 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | Test | Prüft |
 |---|---|
 | `PortableTests` | Pfade, Verschieben des Ordners, fehlende Schreibrechte |
-| `SettingsTests` | Sofortiges Speichern, beschädigte Dateien, Migration |
+| `SettingsTests` | Sofortiges Speichern, beschädigte Dateien, Migration, Einstellungen pro Projekt |
 | `LoggerTests` | Format, Rotation, Größenlimit, Pfad-Schwärzung |
 | `RegistryTests` | Registry-Parser: alle Prüfregeln für Einträge, Pfade und Namen |
 | `GitHubClientTests` | URL-Policy, Wiederholungen, Rate Limit, Größenlimit, Redirects |
@@ -61,8 +63,10 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `DownloadTests` | Download-Warteschlange, Fortschritt, Abbruch, Größen- und Speicherfehler |
 | `SecurityTests` | SHA-256, ZIP-Leser mit kaputten und feindlichen Archiven, Pfadregeln, Validator, Extraktor |
 | `InstallerTests` | Installation, Update mit Backup, Rollback, Deinstallation, gesperrte Dateien, Links |
-| `InstallServiceTests` | Die ganze Kette gegen einen lokalen Server, falsche Hashes, Abbruch |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten, Downloads-Seite |
+| `InstallServiceTests` | Die ganze Kette gegen einen lokalen Server, falsche Hashes, Abbruch, Vorbereiten |
+| `ProcessTests` | Start, Mehrfachstart, Prozessende, von außen gestartete Projekte, Nachkommen |
+| `UpdateTests` | Update-Prüfung, manuell und automatisch, laufende Projekte, Fehler, Warteschlange |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten und Update-Anzeige, Downloads-Seite |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 `build\release\screenshots` ab.
@@ -77,6 +81,8 @@ src/github/            GitHub-Client, Registry, Releases
 src/downloads/         Download-Warteschlange
 src/security/          SHA-256, ZIP-Leser, Archiv-Prüfung
 src/installer/         Installer, Deinstallation, Liste der Installationen, Start
+src/process/           Prozessüberwachung
+src/updater/           Update-Prüfung der Projekte
 src/models/            Datentypen
 src/ui/                Hauptfenster, Seiten, Controls, Theme
 resources/images/      Logo und Icons (erzeugt aus logo-source.png)

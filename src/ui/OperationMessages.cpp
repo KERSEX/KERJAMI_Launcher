@@ -5,6 +5,8 @@
 
 #include <QCoreApplication>
 
+using namespace Qt::StringLiterals;
+
 namespace launcher::ui {
 
 namespace {
@@ -180,6 +182,8 @@ QString startText(const OperationFailure& failure)
         return tr("Das Projekt wird gerade installiert.");
     case StartError::NotInstalled:
         return tr("Das Projekt ist nicht installiert.");
+    case StartError::AlreadyRunning:
+        return tr("Das Projekt läuft bereits.");
     case StartError::FilesMissing:
         return tr("Die Startdatei des Projekts fehlt. Installiere das Projekt erneut.");
     case StartError::ProtectedPath:
@@ -238,8 +242,18 @@ QString stageText(const ProjectStatus& status)
         return tr("Wird entpackt …");
     case ProjectStatus::Stage::Replacing:
         return tr("Wird installiert …");
+    case ProjectStatus::Stage::Prepared:
+        return tr("Update ist bereit und wartet auf das Ende des Projekts.");
     }
     return {};
+}
+
+QString exitText(const ProcessExit& exit)
+{
+    const QString code = u"0x"_s + QString::number(static_cast<quint32>(exit.exitCode), 16).toUpper();
+    if (exit.crashed())
+        return tr("Das Projekt wurde unerwartet beendet (Fehlercode %1).").arg(code);
+    return tr("Das Projekt hat sich nach %1 s mit dem Fehlercode %2 beendet.").arg(exit.runSeconds).arg(code);
 }
 
 } // namespace launcher::ui

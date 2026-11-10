@@ -2,6 +2,7 @@
 
 #include "core/JsonFile.h"
 #include "core/Logger.h"
+#include "github/RegistryParser.h"
 
 #include <QDir>
 #include <QJsonValue>
@@ -28,6 +29,9 @@ constexpr auto kRegistryAutoCheck = "auto_check"_L1;
 constexpr auto kUpdates = "updates"_L1;
 constexpr auto kCheckInterval = "check_interval_minutes"_L1;
 constexpr auto kLauncherAutoCheck = "launcher_auto_check"_L1;
+
+constexpr auto kProjects = "projects"_L1;
+constexpr auto kUpdateMode = "update_mode"_L1;
 
 QString themeToString(ThemeId theme)
 {
@@ -117,6 +121,43 @@ void writeSettings(QJsonObject& root, const LauncherSettings& settings)
     setInSection(root, kUpdates, kLauncherAutoCheck, settings.launcherUpdateAutoCheck);
 }
 
+/// Entries with an invalid id are ignored (and kept untouched in the file); an
+/// unknown update mode counts as manual.
+QHash<QString, ProjectSettings> projectsFromJson(const QJsonObject& root)
+{
+    QHash<QString, ProjectSettings> projects;
+    const QJsonObject section = root.value(kProjects).toObject();
+    for (auto it = section.constBegin(); it != section.constEnd(); ++it) {
+        if (!RegistryParser::isValidProjectId(it.key()) || !it.value().isObject()
+            || projects.size() >= RegistryParser::kMaxProjects)
+            continue;
+        ProjectSettings settings;
+        settings.updateMode = updateModeFromString(it.value().toObject().value(kUpdateMode).toString());
+        projects.insert(it.key(), settings);
+    }
+    return projects;
+}
+
+/// Writes the settings of the known projects into @p root. Other keys of a
+/// project's object stay, and so do entries with ids this build does not accept.
+void writeProjects(QJsonObject& root, const QHash<QString, ProjectSettings>& projects)
+{
+    QJsonObject section = root.value(kProjects).toObject();
+    for (const QString& id : section.keys()) {
+        if (RegistryParser::isValidProjectId(id) && !projects.contains(id))
+            section.remove(id); // removed by the user
+    }
+    for (auto it = projects.cbegin(); it != projects.cend(); ++it) {
+        QJsonObject entry = section.value(it.key()).toObject();
+        entry.insert(kUpdateMode, updateModeToString(it->updateMode));
+        section.insert(it.key(), entry);
+    }
+    if (section.isEmpty())
+        root.remove(kProjects);
+    else
+        root.insert(kProjects, section);
+}
+
 /// Returns the schema version of a file: 0 if it carries no version stamp,
 /// -1 if the stamp is not a non-negative integer.
 int schemaVersionOf(const QJsonObject& root)
@@ -201,6 +242,7 @@ SettingsManager::LoadResult SettingsManager::load()
 
     m_raw = raw;
     m_settings = settingsFromJson(raw);
+    m_projects = projectsFromJson(raw);
 
     if (result == LoadResult::Loaded) {
         qCInfo(lcSettings) << "Settings loaded";
@@ -251,10 +293,44 @@ template <typename T> bool SettingsManager::assign(T LauncherSettings::* member,
     return saved;
 }
 
+UpdateMode SettingsManager::updateMode(const QString& projectId) const
+{
+    return m_projects.value(projectId).updateMode;
+}
+
+bool SettingsManager::setUpdateMode(const QString& projectId, UpdateMode mode)
+{
+    if (!RegistryParser::isValidProjectId(projectId))
+        return false;
+    // An entry per id is cheap, but the file must not grow without bound.
+    if (!m_projects.contains(projectId) && m_projects.size() >= RegistryParser::kMaxProjects)
+        return false;
+
+    const auto found = m_projects.constFind(projectId);
+    if (found != m_projects.cend() && found->updateMode == mode)
+        return true;
+
+    m_projects[projectId].updateMode = mode;
+    const bool saved = save();
+    emit projectSettingsChanged(projectId);
+    emit settingsChanged();
+    return saved;
+}
+
+void SettingsManager::removeProjectSettings(const QString& projectId)
+{
+    if (m_projects.remove(projectId) == 0)
+        return;
+    save();
+    emit projectSettingsChanged(projectId);
+    emit settingsChanged();
+}
+
 bool SettingsManager::save()
 {
     QJsonObject root = m_raw;
     writeSettings(root, m_settings);
+    writeProjects(root, m_projects);
 
     QString error;
     if (!JsonFile::saveAtomic(m_filePath, root, &error)) {

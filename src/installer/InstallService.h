@@ -11,10 +11,16 @@
 #include "models/Release.h"
 
 #include <QHash>
+#include <QList>
 #include <QObject>
 #include <QPointer>
 
+#include <atomic>
+#include <functional>
+#include <memory>
 #include <optional>
+
+class QThread;
 
 namespace launcher {
 
@@ -28,6 +34,7 @@ struct ProjectStatus {
         Verifying, ///< SHA-256 of the downloaded archive.
         Extracting,
         Replacing, ///< Moving the new version into place. Cannot be cancelled any more.
+        Prepared,  ///< Downloaded and verified, waiting for installPrepared() (the project is running).
     };
 
     Stage stage = Stage::Idle;
@@ -75,17 +82,36 @@ public:
     InstallService(GitHubClient& client, ReleaseManager& releases, DownloadManager& downloads,
         Installer& installer, Uninstaller& uninstaller, InstalledProjects& installed,
         const LibraryLayout& layout, QObject* parent = nullptr);
+    ~InstallService() override;
+
+    /// How far install() goes.
+    enum class Mode {
+        InstallNow,  ///< All the way to the installed project.
+        PrepareOnly, ///< Download and verify, then wait: prepared() is emitted, installPrepared() goes on.
+    };
 
     /// Installs the newest stable release of the project, or replaces the
     /// installed version with it. Does nothing while an operation for the
     /// project is running.
-    void install(const Project& project);
+    void install(const Project& project, Mode mode = Mode::InstallNow);
 
-    /// Stops an installation that has not started to replace the installed version.
+    /// Installs what install(…, PrepareOnly) has prepared. Does nothing for a
+    /// project that is not in the Prepared stage.
+    void installPrepared(const QString& projectId);
+
+    /// Stops an operation that has not started to replace the installed version.
+    /// A prepared update is discarded.
     void cancel(const QString& projectId);
 
     /// The user has confirmed. Fails with UninstallError::Busy during an installation.
     UninstallResult uninstall(const QString& projectId);
+
+    /// How start() launches a project. The default starts it on its own
+    /// (startProject); the application sets the ProcessManager's start here.
+    void setStarter(std::function<StartResult(const QString& projectId)> starter)
+    {
+        m_starter = std::move(starter);
+    }
 
     StartResult start(const QString& projectId);
 
@@ -106,18 +132,26 @@ signals:
     /// = false and no failure.
     void installFinished(const QString& projectId, bool success);
 
+    /// A PrepareOnly installation has downloaded and verified its archive and waits.
+    void prepared(const QString& projectId);
+
 private:
     struct Session {
         Project project;
         ProjectStatus status;
+        Mode mode = Mode::InstallNow;
         std::optional<ReleaseSelection> selection;
         QString expectedSha256;
         DownloadId downloadId = 0;
         QString archivePath;
         QPointer<GitHubRequest> checksumRequest;
+        std::shared_ptr<std::atomic<bool>> verifyCancel; ///< Set while the early verification runs.
         bool cancelled = false;
     };
 
+    void startInstaller(Session& session);
+    void startEarlyVerification(Session& session);
+    void onEarlyVerified(const QString& projectId, int status, const QString& detail);
     void onReleaseReady(const QString& projectId, const ReleaseSelection& selection);
     void onReleaseFailed(const QString& projectId, ReleaseManager::Problem problem, int httpStatus);
     void fetchChecksum(Session& session);
@@ -146,9 +180,11 @@ private:
     Uninstaller& m_uninstaller;
     InstalledProjects& m_installed;
     LibraryLayout m_layout;
+    std::function<StartResult(const QString&)> m_starter;
 
     QHash<QString, Session> m_sessions;
     QHash<QString, OperationFailure> m_failures;
+    QList<QThread*> m_verifiers;
 };
 
 } // namespace launcher

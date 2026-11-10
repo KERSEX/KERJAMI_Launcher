@@ -261,20 +261,55 @@ Die Projektkarte der Bibliothek zeigt Zustand, Fortschritt und Fehler und ruft d
 Der Start räumt übrig gebliebene `staging-*` und `uninstall-*` aus `temp/` auf. Alle Entscheidungen
 und Grenzen stehen in [03-entscheidungen.md](03-entscheidungen.md), D-27 bis D-34.
 
-### Phase 5 – Projekt-Updates
+### Phase 5 – Projekt-Updates (umgesetzt)
 
 ```cpp
-class ProcessManager : public QObject { // QProcess plus Job-Objekt für Kindprozesse
-    bool start(const Project& project);  bool isRunning(const QString& projectId) const;
-signals: void started(const QString& projectId);  void exited(const QString& projectId, int code);
+enum class UpdateMode { Manual, Automatic };      // models/ProjectSettings.h
+class SettingsManager {                           // Abschnitt "projects" in settings.json (D-38)
+    UpdateMode updateMode(const QString& projectId) const;       // Manual ohne Eintrag
+    bool setUpdateMode(const QString& projectId, UpdateMode);    // sofort gespeichert
+    void removeProjectSettings(const QString& projectId);
+signals: void projectSettingsChanged(const QString& projectId);
 };
-class ProjectUpdateManager : public QObject {
-    UpdateState state(const QString& projectId) const;  // UpToDate | Available | Downloading | Pending | …
-    void checkAll();  void applyUpdate(const QString& projectId);
+
+class ProcessManager : public QObject {           // process/, D-35
+    StartResult start(const QString& projectId);              // Job-Objekt; AlreadyRunning bei Mehrfachstart
+    bool isRunning(id) const;                                 // Stand der letzten Abfrage, für die UI
+    bool isRunningNow(id) const;                              // frisch, aus jedem Thread
+    void refresh();                                           // alle 2 s; Tests rufen es selbst
+    optional<ProcessExit> lastExit(id) const;                 // Exitcode, crashed(), unexpected()
+signals: void started(id);  void runningChanged(id, bool);  void exited(id, ProcessExit);
+};
+
+class InstallService {                            // Phase 4, erweitert
+    enum class Mode { InstallNow, PrepareOnly };
+    void install(const Project&, Mode = Mode::InstallNow);    // PrepareOnly: laden + prüfen, dann warten
+    void installPrepared(const QString& projectId);           // geht mit dem Vorbereiteten weiter
+    void setStarter(std::function<StartResult(const QString&)>);   // die Anwendung setzt ProcessManager::start
+signals: void prepared(id);  // plus Stage::Prepared
+};
+
+enum class UpdateState { Unknown, UpToDate, Available, Queued, Downloading, Verifying, Pending, Installing, Failed };
+class ProjectUpdateManager : public QObject {     // updater/, D-36 und D-37
+    void start();  void checkAll();                           // Intervall aus den Einstellungen
+    UpdateInfo info(const QString& projectId) const;          // Zustand, Versionen, Changelog, Fehler
+    void applyUpdate(id);  void cancel(id);                   // Entscheidung des Nutzers
+    QStringList queue() const;  QStringList active() const;
+signals: void updateChanged(id);  void checkFinished();
 };
 ```
 
-Pro-Projekt-Einstellungen (`update_mode`) kommen als Abschnitt `projects` in `settings.json`.
+Die Anwendung verbindet die Teile: `Installer` und `Uninstaller` fragen vor jedem Eingriff den
+`ProcessManager` (`setRunningCheck(isRunningNow)`), der Dienst startet über ihn, und der
+Update-Manager entscheidet je Projekt nach dem Modus. Die Oberfläche bekommt alle Manager gebündelt
+in einem `ui::AppContext`.
+
+Die Projektkarte zeigt das Update-Badge („Update 2.0.0“), „Aktualisieren“ mit Rückfrage und
+Changelog, „Updates: Manuell/Automatisch“, den Zustand „läuft“ und unerwartete Programmenden
+(`ui/ProjectCard`, `ui/Dialogs`, `ui/OperationMessages`).
+
+Der Start löscht außerdem übrig gebliebene Archive in `downloads/<Projekt>/`. Entscheidungen und
+Grenzen: [03-entscheidungen.md](03-entscheidungen.md), D-35 bis D-38.
 
 ### Phase 6 – Selbstupdate
 
@@ -298,9 +333,9 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | Datei | Inhalt | Phase |
 |---|---|---|
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
-| `SettingsTests.cpp` | Persistenz, Korruption, Migration | 1 |
+| `SettingsTests.cpp` | Persistenz, Korruption, Migration, Einstellungen pro Projekt | 1, 5 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek, Downloads-Seite | 1–3 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite | 1–5 |
 | `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln | 2 |
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
@@ -310,7 +345,9 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `SecurityTests.cpp` | SHA-256, Prüfsummendatei, ZIP-Leser (kaputte und feindliche Archive), Pfadregeln, Validator, Extraktor | 4 |
 | `InstallerTests.cpp` | Installation, Update mit Backup, Rollback, Deinstallation, Liste der Installationen, laufendes Programm, Links | 4 |
 | `InstallServiceTests.cpp` | Die ganze Kette gegen einen lokalen Server: Hash-Quellen, falsche Hashes, feindliche Archive, Abbruch | 4 |
-| `UpdateTests.cpp`, Selbstupdate-Tests | | 5–6 |
+| `ProcessTests.cpp` | Start, Mehrfachstart, Ende und Exitcode, Programm von außen gestartet, Nachkommen außerhalb des Ordners, Threads (mit dem Hilfsprogramm `SleepyApp`) | 5 |
+| `UpdateTests.cpp` | Prüfung, manuell und automatisch, laufendes Projekt, Vormerkung, Fehler, Warteschlange, Modi je Projekt, Netzwerkfehler | 5 |
+| Selbstupdate-Tests | | 6 |
 
 ## Stand
 
@@ -320,7 +357,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 2 | Registry | umgesetzt und gegen GitHub geprüft; die echte Registry fehlt noch (E-03), bis dahin zeigt die Bibliothek „nicht gefunden (HTTP 404)“ |
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
 | 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
-| 5 | Projekt-Updates | offen |
+| 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; wie Phase 4 ohne Test gegen echte GitHub-Releases (E-02) |
 | 6 | Launcher-Selbstupdate | offen; braucht Releases in `KERSEX/KERJAMI_Launcher` |
 | 7 | UI-Fertigstellung | offen |
 | 8 | Portable Release | offen; braucht Entscheidung E-01 |

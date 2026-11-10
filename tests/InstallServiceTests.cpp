@@ -477,6 +477,125 @@ private slots:
         QVERIFY(!m_installed->contains(u"tool"_s));
     }
 
+    // --- preparing an installation (for updates that wait) ----------------------------
+
+    void prepareOnlyStopsAfterTheVerificationAndKeepsTheArchive()
+    {
+        QSignalSpy prepared(m_service.get(), &InstallService::prepared);
+        QSignalSpy finished(m_service.get(), &InstallService::installFinished);
+        m_service->install(m_project, InstallService::Mode::PrepareOnly);
+        QVERIFY(prepared.wait(30000));
+
+        QCOMPARE(prepared.first().first().toString(), u"tool"_s);
+        QCOMPARE(m_service->status(u"tool"_s).stage, ProjectStatus::Stage::Prepared);
+        QVERIFY(m_service->isBusy(u"tool"_s));
+        QCOMPARE(finished.size(), 0);
+
+        // Nothing is installed; the verified archive waits in downloads/.
+        QVERIFY(!m_installed->contains(u"tool"_s));
+        QVERIFY(!QFileInfo::exists(library(u"Tool"_s)));
+        QCOMPARE(readFile(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s), m_offer.archive);
+
+        // While it waits, the project cannot be removed or installed a second time.
+        QCOMPARE(m_service->uninstall(u"tool"_s).error, launcher::UninstallError::Busy);
+        m_service->install(m_project);
+        QCOMPARE(m_service->busyCount(), 1);
+
+        // Going on installs what was prepared, without asking GitHub or downloading again.
+        const int requests = m_server->requestCount();
+        m_service->installPrepared(u"tool"_s);
+        QVERIFY(finished.wait(30000));
+        QVERIFY(finished.first().at(1).toBool());
+        QCOMPARE(readFile(library(u"Tool/current/Tool.exe"_s)), QByteArray("EXE-1.0.0"));
+        QCOMPARE(m_server->requestCount(), requests);
+        QVERIFY(!QFileInfo::exists(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s));
+    }
+
+    void prepareOnlyRejectsABadFileAtOnce()
+    {
+        m_offer.digest = u"0"_s.repeated(64);
+        QSignalSpy prepared(m_service.get(), &InstallService::prepared);
+        QSignalSpy finished(m_service.get(), &InstallService::installFinished);
+        m_service->install(m_project, InstallService::Mode::PrepareOnly);
+        QVERIFY(finished.wait(30000));
+
+        QCOMPARE(prepared.size(), 0);
+        QVERIFY(!finished.first().at(1).toBool());
+        const OperationFailure failure = m_service->lastFailure(u"tool"_s);
+        QCOMPARE(failure.kind, Kind::Install);
+        QCOMPARE(failure.code, static_cast<int>(InstallError::HashMismatch));
+        QVERIFY(!QFileInfo::exists(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s));
+        QVERIFY(!m_installed->contains(u"tool"_s));
+        QVERIFY(QDir(m_paths->tempDir()).isEmpty());
+    }
+
+    void cancelDiscardsAPreparedInstallation()
+    {
+        QSignalSpy prepared(m_service.get(), &InstallService::prepared);
+        QSignalSpy finished(m_service.get(), &InstallService::installFinished);
+        m_service->install(m_project, InstallService::Mode::PrepareOnly);
+        QVERIFY(prepared.wait(30000));
+
+        m_service->cancel(u"tool"_s);
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(!finished.first().at(1).toBool());
+        QVERIFY(!m_service->lastFailure(u"tool"_s).isFailure());
+        QVERIFY(!m_service->isBusy(u"tool"_s));
+        QVERIFY(!QFileInfo::exists(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s));
+        QVERIFY(!m_installed->contains(u"tool"_s));
+    }
+
+    void installPreparedDoesNothingOutsideThePreparedStage()
+    {
+        m_service->installPrepared(u"tool"_s); // nothing running
+        m_service->installPrepared(u"nobody"_s);
+        QVERIFY(!m_service->isBusy(u"tool"_s));
+
+        QSignalSpy finished(m_service.get(), &InstallService::installFinished);
+        m_service->install(m_project, InstallService::Mode::PrepareOnly);
+        m_service->installPrepared(u"tool"_s); // still asking GitHub: not prepared yet
+        QCOMPARE(m_service->status(u"tool"_s).stage, ProjectStatus::Stage::FetchingRelease);
+        m_service->cancel(u"tool"_s);
+        QCOMPARE(finished.size(), 1);
+        QTest::qWait(300);
+        QVERIFY(!m_installed->contains(u"tool"_s));
+    }
+
+    void cancelDuringTheEarlyVerificationIsNoFailure()
+    {
+        // A larger archive, so that the verification takes a moment.
+        m_offer = offerFor(u"1.0.0"_s, {testzip::file(u"Tool.exe"_s, QByteArray(40'000'000, 'x'), false)});
+        QSignalSpy prepared(m_service.get(), &InstallService::prepared);
+        QSignalSpy finished(m_service.get(), &InstallService::installFinished);
+        m_service->install(m_project, InstallService::Mode::PrepareOnly);
+        QTRY_COMPARE_WITH_TIMEOUT(m_service->status(u"tool"_s).stage, ProjectStatus::Stage::Verifying, 30000);
+
+        m_service->cancel(u"tool"_s);
+        QVERIFY(finished.wait(30000));
+        QVERIFY(!finished.first().at(1).toBool());
+        QVERIFY(!m_service->lastFailure(u"tool"_s).isFailure());
+        QCOMPARE(prepared.size(), 0);
+        QVERIFY(!QFileInfo::exists(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s));
+    }
+
+    void startUsesTheConfiguredStarter()
+    {
+        QString asked;
+        m_service->setStarter([&asked](const QString& id) {
+            asked = id;
+            launcher::StartResult result;
+            result.error = launcher::StartError::AlreadyRunning;
+            return result;
+        });
+        QVERIFY(installAndWait());
+        const auto result = m_service->start(u"tool"_s);
+        QCOMPARE(asked, u"tool"_s);
+        QCOMPARE(result.error, launcher::StartError::AlreadyRunning);
+        QCOMPARE(m_service->lastFailure(u"tool"_s).kind, Kind::Start);
+        QCOMPARE(
+            m_service->lastFailure(u"tool"_s).code, static_cast<int>(launcher::StartError::AlreadyRunning));
+    }
+
     // --- uninstall and start --------------------------------------------------
 
     void uninstallRemovesTheProject()

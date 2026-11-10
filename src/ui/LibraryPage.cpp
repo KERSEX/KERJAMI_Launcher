@@ -87,12 +87,10 @@ QString projectCountText(qsizetype count)
 
 } // namespace
 
-LibraryPage::LibraryPage(
-    RegistryManager& registry, InstallService& service, InstalledProjects& installed, QWidget* parent)
+LibraryPage::LibraryPage(const AppContext& context, QWidget* parent)
     : Page(tr("Bibliothek"), tr("Alle freigegebenen Projekte aus der offiziellen Registry."), parent)
-    , m_registry(registry)
-    , m_service(service)
-    , m_installed(installed)
+    , m_context(context)
+    , m_registry(context.registry)
 {
     auto* searchRow = new QHBoxLayout;
     searchRow->setSpacing(10);
@@ -295,7 +293,7 @@ void LibraryPage::rebuildList()
     }
 
     for (const Project& project : projects)
-        m_listLayout->addWidget(new ProjectCard(project, m_service, m_installed, m_listHolder));
+        m_listLayout->addWidget(new ProjectCard(project, m_context, m_listHolder));
 }
 
 } // namespace launcher::ui
