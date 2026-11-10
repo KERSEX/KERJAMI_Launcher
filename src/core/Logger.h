@@ -12,6 +12,8 @@ Q_DECLARE_LOGGING_CATEGORY(lcApp)
 Q_DECLARE_LOGGING_CATEGORY(lcSettings)
 Q_DECLARE_LOGGING_CATEGORY(lcNetwork)
 Q_DECLARE_LOGGING_CATEGORY(lcRegistry)
+Q_DECLARE_LOGGING_CATEGORY(lcReleases)
+Q_DECLARE_LOGGING_CATEGORY(lcDownload)
 
 /// Writes all Qt log messages of the process to a size-limited, rotating file.
 ///

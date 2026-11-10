@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
+#include "downloads/DownloadManager.h"
 #include "github/GitHubClient.h"
 #include "github/RegistryManager.h"
 #include "ui/MainWindow.h"
@@ -110,7 +111,11 @@ int Application::run()
     applyRegistrySettings();
     QObject::connect(&settings, &SettingsManager::settingsChanged, &registry, applyRegistrySettings);
 
-    ui::MainWindow window(paths, settings, registry);
+    // Created after the client and destroyed before it: running transfers are
+    // stopped and their partial files removed while the client still exists.
+    DownloadManager downloads(client, paths.tempDir(), paths.downloadsDir());
+
+    ui::MainWindow window(paths, settings, registry, downloads);
     window.show();
 
     if (settings.settings().registryAutoCheck)

@@ -67,6 +67,8 @@ QLatin1StringView errorName(NetworkError error)
         return "rate limited"_L1;
     case NetworkError::TooLarge:
         return "response too large"_L1;
+    case NetworkError::FileError:
+        return "file error"_L1;
     case NetworkError::TooManyRedirects:
         return "too many redirects"_L1;
     case NetworkError::Aborted:
@@ -192,16 +194,77 @@ void GitHubRequest::send()
     request.setTransferTimeout(std::chrono::milliseconds(m_options.timeoutMs));
 
     m_tooLarge = false;
+    m_writeFailed = false;
+    m_written = 0;
+    m_file.reset();
+    if (!m_options.saveToFile.isEmpty()) {
+        // Every attempt, and every redirect hop, starts the file anew.
+        auto file = std::make_unique<QFile>(m_options.saveToFile);
+        if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            NetworkResult result;
+            result.error = NetworkError::FileError;
+            result.finalUrl = m_current;
+            result.detail = u"cannot open the target file: %1"_s.arg(file->errorString());
+            complete(result);
+            return;
+        }
+        m_file = std::move(file);
+    }
+
     QNetworkReply* reply = m_client->network()->get(request);
     m_reply = reply;
 
     connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64 received, qint64 total) {
-        if (m_reply == reply && (received > m_options.maxBytes || total > m_options.maxBytes)) {
+        if (m_reply != reply)
+            return;
+        if (received > m_options.maxBytes || total > m_options.maxBytes) {
             m_tooLarge = true;
             reply->abort();
+            return;
         }
     });
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply] { drain(reply); });
     connect(reply, &QNetworkReply::finished, this, &GitHubRequest::onFinished);
+}
+
+/// Moves what has arrived of a successful answer into the target file.
+/// Other answers are small error pages and stay in the reply.
+void GitHubRequest::drain(QNetworkReply* reply)
+{
+    if (!m_file || m_writeFailed || m_reply != reply)
+        return;
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status < 200 || status >= 300)
+        return;
+
+    // The length the server announced, -1 if it did not say.
+    const QVariant announced = reply->header(QNetworkRequest::ContentLengthHeader);
+    const qint64 total = announced.isValid() ? announced.toLongLong() : -1;
+    if (total > m_options.maxBytes) {
+        m_tooLarge = true;
+        reply->abort();
+        return;
+    }
+
+    const QByteArray chunk = reply->readAll();
+    if (chunk.isEmpty())
+        return;
+    if (m_file->write(chunk) != chunk.size()) {
+        m_writeFailed = true;
+        m_fileError = m_file->errorString();
+        reply->abort();
+        return;
+    }
+    m_written += chunk.size();
+    if (m_written > m_options.maxBytes) {
+        m_tooLarge = true;
+        reply->abort();
+        return;
+    }
+
+    // Counted here, from what has been written. Qt's own progress signal can
+    // lag behind the data by seconds when a transfer stalls.
+    emit downloadProgress(m_written, total);
 }
 
 void GitHubRequest::onFinished()
@@ -209,6 +272,7 @@ void GitHubRequest::onFinished()
     if (m_done || !m_reply)
         return;
     QNetworkReply* reply = m_reply.data();
+    drain(reply); // whatever arrived after the last readyRead()
     m_reply.clear();
     reply->deleteLater();
 
@@ -219,6 +283,13 @@ void GitHubRequest::onFinished()
     if (result.rateLimit.isKnown())
         m_client->noteRateLimit(result.rateLimit);
     const int status = result.httpStatus;
+
+    if (m_writeFailed) {
+        result.error = NetworkError::FileError;
+        result.detail = u"cannot write the target file: %1"_s.arg(m_fileError);
+        complete(result);
+        return;
+    }
 
     if (m_tooLarge) {
         result.error = NetworkError::TooLarge;
@@ -274,11 +345,23 @@ void GitHubRequest::onFinished()
     }
 
     if (status >= 200 && status < 300) {
-        result.body = reply->readAll();
-        if (result.body.size() > m_options.maxBytes) {
-            result.error = NetworkError::TooLarge;
-            result.body.clear();
-            result.detail = u"response is larger than %1 bytes"_s.arg(m_options.maxBytes);
+        if (m_file) {
+            result.bytesReceived = m_written;
+            if (m_written > m_options.maxBytes) {
+                result.error = NetworkError::TooLarge;
+                result.detail = u"response is larger than %1 bytes"_s.arg(m_options.maxBytes);
+            } else if (!m_file->flush()) {
+                result.error = NetworkError::FileError;
+                result.detail = u"cannot write the target file: %1"_s.arg(m_file->errorString());
+            }
+        } else {
+            result.body = reply->readAll();
+            result.bytesReceived = result.body.size();
+            if (result.body.size() > m_options.maxBytes) {
+                result.error = NetworkError::TooLarge;
+                result.body.clear();
+                result.detail = u"response is larger than %1 bytes"_s.arg(m_options.maxBytes);
+            }
         }
         complete(result);
         return;
@@ -319,6 +402,10 @@ void GitHubRequest::complete(NetworkResult result)
         return;
     m_done = true;
     m_retryTimer->stop();
+    if (m_file) {
+        m_file->close(); // the file stays; whoever asked decides what to do with it
+        m_file.reset();
+    }
     result.attempts = m_attempts;
     if (!result.finalUrl.isValid())
         result.finalUrl = m_originalUrl;
@@ -326,7 +413,7 @@ void GitHubRequest::complete(NetworkResult result)
     const QString target = describeTarget(result.finalUrl);
     if (result.ok()) {
         qCInfo(lcNetwork).noquote() << "GET" << target << "->" << result.httpStatus << '('
-                                    << result.body.size() << "bytes," << m_clock.elapsed() << "ms )";
+                                    << result.bytesReceived << "bytes," << m_clock.elapsed() << "ms )";
     } else if (result.error == NetworkError::Aborted) {
         qCInfo(lcNetwork).noquote() << "GET" << target << "aborted";
     } else {

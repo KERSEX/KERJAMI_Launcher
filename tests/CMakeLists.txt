@@ -15,6 +15,9 @@ launcher_add_test(LoggerTests)
 launcher_add_test(RegistryTests)
 launcher_add_test(GitHubClientTests)
 launcher_add_test(RegistryManagerTests)
+launcher_add_test(SemVerTests)
+launcher_add_test(ReleaseTests)
+launcher_add_test(DownloadTests)
 
 # The UI test runs without a visible window. Screenshots of every page are
 # written to the build directory for visual review.

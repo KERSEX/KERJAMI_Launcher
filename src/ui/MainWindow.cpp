@@ -29,8 +29,8 @@ constexpr int kFadeDurationMs = 140;
 
 } // namespace
 
-MainWindow::MainWindow(
-    const PathManager& paths, SettingsManager& settings, RegistryManager& registry, QWidget* parent)
+MainWindow::MainWindow(const PathManager& paths, SettingsManager& settings, RegistryManager& registry,
+    DownloadManager& downloads, QWidget* parent)
     : QMainWindow(parent)
 {
     setWindowTitle(branding::displayName());
@@ -49,7 +49,7 @@ MainWindow::MainWindow(
     auto* dashboard = new DashboardPage(m_pages);
     m_pages->addWidget(dashboard);
     m_pages->addWidget(new LibraryPage(registry, m_pages));
-    m_pages->addWidget(new DownloadsPage(m_pages));
+    m_pages->addWidget(new DownloadsPage(downloads, m_pages));
     m_pages->addWidget(new SettingsPage(paths, settings, m_pages));
 
     layout->addWidget(createSidebar());

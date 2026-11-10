@@ -146,36 +146,53 @@ Erlaubte Hosts (`Policy::production()`): `raw.githubusercontent.com`, `api.githu
 nur über HTTPS auf dem Standardport. Die Entscheidungen dazu stehen in
 [03-entscheidungen.md](03-entscheidungen.md), D-16 bis D-21.
 
-### Phase 3 – Releases und Downloads
+### Phase 3 – Releases und Downloads (umgesetzt)
 
 ```cpp
-struct SemVer { int major, minor, patch; QString preRelease;
-    static std::optional<SemVer> parse(QStringView text);   // tolerant gegenüber Tag-Präfix
-    std::strong_ordering operator<=>(const SemVer&) const; };
-
-struct ReleaseAsset { QString name; QUrl downloadUrl; qint64 size; QByteArray sha256; };
-struct Release { SemVer version; QString tag, notes; bool preRelease; QList<ReleaseAsset> assets; };
-
-class ReleaseManager : public QObject {
-    void fetchLatest(const Project& project);
-signals:
-    void releaseReady(const QString& projectId, const Release& release);
-    void fetchFailed(const QString& projectId, ReleaseError error);
+class SemVer {                          // core/SemVer.h, Semantic Versioning 2.0.0
+    int major, minor, patch;  QStringList preRelease;  QString build;
+    static std::optional<SemVer> parse(const QString& text);   // "1.2.3", "v1.2.3", "1.0.0-rc.1+b5"
+    friend std::strong_ordering operator<=>(const SemVer&, const SemVer&);   // build wird ignoriert
 };
 
-class DownloadManager : public QObject {    // Warteschlange, begrenzte Parallelität
+struct ReleaseAsset { QString name; qint64 size; QString sha256; };   // sha256 leer ohne GitHub-Digest
+struct Release { QString tag; SemVer version; QString title, notes; QDateTime publishedAt;
+                 QList<ReleaseAsset> assets; };
+struct ReleaseSelection { Release release; ReleaseAsset asset; QUrl downloadUrl; };
+
+namespace ReleaseParser {               // github/ReleaseParser.h, reine Funktionen
+ReleaseListResult parseList(const QByteArray& json);
+const Release* latest(const QList<Release>&);                      // höchste Version, nicht erste
+QList<ReleaseAsset> matchingAssets(const Release&, const QString& pattern);
+}
+
+class ReleaseManager : public QObject {
+    void fetchLatest(const Project& project);       // eine API-Anfrage je Projekt
+    std::optional<ReleaseSelection> latest(const QString& projectId) const;
+signals:
+    void releaseReady(const QString& projectId, const ReleaseSelection& selection);
+    void fetchFailed(const QString& projectId, Problem problem, int httpStatus);
+};                                      // Problem: InvalidProject | Unreachable | RateLimited | Http |
+                                        // InvalidContent | NoRelease | NoMatchingAsset | AmbiguousAsset
+
+class DownloadManager : public QObject {            // Warteschlange, standardmäßig 2 parallel
     DownloadId enqueue(const DownloadRequest& request);
-    void cancel(DownloadId id);
+    void cancel(DownloadId id);   void clearFinished();
     QList<Download> downloads() const;
 signals:
-    void progress(DownloadId id, qint64 received, qint64 total, qint64 bytesPerSecond);
-    void finished(DownloadId id);  void failed(DownloadId id, DownloadError error);
+    void added(id);  void stateChanged(id);  void progressChanged(id);
+    void finished(id);  void failed(id);  void removed(id);
 };
 ```
 
-Downloads schreiben nach `temp/<id>.part`, prüfen die Größe gegen die Asset-Angabe und werden
-erst nach bestandener Hash-Prüfung nach `downloads/` verschoben. Wiederholungen mit
-Exponential-Backoff, höchstens drei Versuche, keine Wiederholung bei 4xx außer 429.
+`GitHubClient` kann den Körper einer Antwort direkt in eine Datei streamen
+(`FetchOptions::saveToFile`) und meldet den Fortschritt aus den geschriebenen Bytes.
+
+Ablauf eines Downloads: `temp/download-<id>.part` → Größe gegen die Angabe des Releases prüfen →
+`downloads/<projekt>/<datei>`. Wiederholungen mit Backoff (höchstens drei Versuche, ein
+unterbrochener Versuch beginnt die Datei neu), keine Wiederholung bei 4xx außer 429. Die
+SHA-256-Prüfung folgt in Phase 4, bevor etwas entpackt wird. Details und Begründungen stehen in
+[03-entscheidungen.md](03-entscheidungen.md), D-21 bis D-26.
 
 ### Phase 4 – Installation
 
@@ -234,11 +251,13 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration | 1 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Filtern und Fehlerzuständen | 1–2 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek, Downloads-Seite | 1–3 |
 | `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln | 2 |
-| `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch | 2 |
+| `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
-| `VersionTests.cpp`, `DownloadTests.cpp` | | 3 |
+| `SemVerTests.cpp` | Gültige und ungültige Versionen, Reihenfolge nach der SemVer-Spezifikation | 3 |
+| `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3 |
+| `DownloadTests.cpp` | Tempo, Formatierung, Warteschlange, Abbruch, Größen- und Speicherfehler | 3 |
 | `SecurityTests.cpp`, `InstallerTests.cpp` | | 4 |
 | `UpdateTests.cpp`, Selbstupdate-Tests | | 5–6 |
 
@@ -248,7 +267,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 |---|---|---|
 | 1 | Grundgerüst | umgesetzt |
 | 2 | Registry | umgesetzt und gegen GitHub geprüft; die echte Registry fehlt noch (E-03), bis dahin zeigt die Bibliothek „nicht gefunden (HTTP 404)“ |
-| 3 | Releases und Downloads | offen |
+| 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
 | 4 | Installation | offen; der echte Test braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | offen |
 | 6 | Launcher-Selbstupdate | offen; braucht Releases in `KERSEX/KERJAMI_Launcher` |

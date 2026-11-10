@@ -79,6 +79,10 @@ bool isValidAssetPattern(const QString& pattern);
 /// A relative path with "/" separators that ends in ".exe" and cannot leave the install folder.
 bool isValidExecutablePath(const QString& path);
 
+/// True for names Windows reserves for devices ("CON", "NUL", "COM1", ...),
+/// also with an extension ("con.txt"). Such a file or folder cannot be created.
+bool isReservedWindowsName(const QString& name);
+
 } // namespace RegistryParser
 
 } // namespace launcher

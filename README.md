@@ -14,10 +14,11 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Die Phasen 1 und 2 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
-Pfadverwaltung, Einstellungen und Logging, dazu der GitHub-Client und die Projekt-Registry mit
-Zwischenspeicher, Offline-Verhalten und Bibliotheksseite. Releases, Downloads, Installation und
-Updates folgen. Details stehen in [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
+Die Phasen 1 bis 3 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die Projekt-Registry mit
+Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version und die
+Download-Warteschlange mit Fortschritt. Installation und Updates folgen. Details stehen in
+[docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 ## Bauen
 
@@ -52,7 +53,10 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `RegistryTests` | Registry-Parser: alle Prüfregeln für Einträge, Pfade und Namen |
 | `GitHubClientTests` | URL-Policy, Wiederholungen, Rate Limit, Größenlimit, Redirects |
 | `RegistryManagerTests` | Laden, Cache, Offline-Verhalten, beschädigter Cache |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Filtern und Fehlerzuständen |
+| `SemVerTests` | Versionen lesen und vergleichen nach SemVer 2.0 |
+| `ReleaseTests` | Release-Antwort lesen, Datei wählen, Prüfsumme, ReleaseManager |
+| `DownloadTests` | Download-Warteschlange, Fortschritt, Abbruch, Größen- und Speicherfehler |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek, Downloads-Seite |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 `build\release\screenshots` ab.

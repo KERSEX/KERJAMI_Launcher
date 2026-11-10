@@ -4,9 +4,11 @@
 // If LAUNCHER_TEST_SCREENSHOT_DIR is set (CTest sets it), a screenshot of every
 // page is saved there for visual review.
 
+#include "TestHttpServer.h"
 #include "app/Branding.h"
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
+#include "downloads/DownloadManager.h"
 #include "github/GitHubClient.h"
 #include "github/RegistryManager.h"
 #include "ui/MainWindow.h"
@@ -24,6 +26,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -31,6 +34,7 @@
 #include <memory>
 
 using namespace Qt::StringLiterals;
+using launcher::DownloadManager;
 using launcher::FetchOptions;
 using launcher::GitHubClient;
 using launcher::PathManager;
@@ -123,7 +127,24 @@ private slots:
     void libraryShowsAnErrorWithoutAStoredList();
     void libraryRefreshButtonShowsLoadingState();
 
+    void downloadsPageStartsEmpty();
+    void downloadsPageShowsProgressAndCancels();
+    void downloadsPageShowsFinishedAndFailedDownloads();
+    void downloadsPageClearsTheHistory();
+
 private:
+    launcher::DownloadRequest downloadRequest(
+        const QString& path, const QString& fileName, qint64 size, const QString& title) const
+    {
+        launcher::DownloadRequest request;
+        request.projectId = u"demo"_s;
+        request.title = title;
+        request.url = m_server->url(path);
+        request.fileName = fileName;
+        request.expectedSize = size;
+        return request;
+    }
+
     template <typename T> static T* find(QWidget& parent, const char* objectName)
     {
         return parent.findChild<T*>(QLatin1StringView(objectName));
@@ -164,6 +185,8 @@ private:
     std::unique_ptr<SettingsManager> m_settings;
     std::unique_ptr<GitHubClient> m_client;
     std::unique_ptr<RegistryManager> m_registry;
+    std::unique_ptr<DownloadManager> m_downloads;
+    std::unique_ptr<TestHttpServer> m_server;
 };
 
 void UiSmokeTests::initTestCase()
@@ -187,10 +210,32 @@ void UiSmokeTests::init()
     quick.maxAttempts = 1;
     quick.timeoutMs = 2000;
     m_registry->setFetchOptions(quick);
+    m_downloads = std::make_unique<DownloadManager>(*m_client, m_paths->tempDir(), m_paths->downloadsDir());
+    m_downloads->setFetchOptions(quick);
+
+    // "/slow" delivers a third of the file and then stalls, "/missing" is gone, anything else is small.
+    m_server = std::make_unique<TestHttpServer>([](const TestHttpServer::Request& request) {
+        TestHttpServer::Response response;
+        if (request.path == u"/missing"_s) {
+            response.status = 404;
+            response.body = "Not Found";
+            return response;
+        }
+        const bool slow = request.path == u"/slow"_s;
+        response.body = QByteArray(slow ? 600 * 1024 : 50 * 1024, 'x');
+        if (slow) {
+            response.behavior = TestHttpServer::Response::Behavior::SendPartialThenHang;
+            response.partialBytes = 200 * 1024;
+        }
+        return response;
+    });
+    QVERIFY(m_server->listen());
 }
 
 void UiSmokeTests::cleanup()
 {
+    m_server.reset();
+    m_downloads.reset();
     m_registry.reset();
     m_client.reset();
     m_settings.reset();
@@ -210,7 +255,7 @@ void UiSmokeTests::styleSheetIsLoadedWithAllTokensResolved()
 
 void UiSmokeTests::startsOnDashboard()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     QCOMPARE(window.currentPage(), PageId::Dashboard);
     QVERIFY(find<QAbstractButton>(window, "NavDashboard")->isChecked());
     QVERIFY(!find<QAbstractButton>(window, "NavLibrary")->isChecked());
@@ -220,7 +265,7 @@ void UiSmokeTests::startPageSettingIsRespected()
 {
     QVERIFY(m_settings->setStartPage(StartPage::Library));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     QCOMPARE(window.currentPage(), PageId::Library);
     QVERIFY(find<QAbstractButton>(window, "NavLibrary")->isChecked());
     QVERIFY(!find<QAbstractButton>(window, "NavDashboard")->isChecked());
@@ -228,7 +273,7 @@ void UiSmokeTests::startPageSettingIsRespected()
 
 void UiSmokeTests::sidebarSwitchesPages()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -252,7 +297,7 @@ void UiSmokeTests::sidebarSwitchesPages()
 
 void UiSmokeTests::dashboardLinksToLibrary()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -265,7 +310,7 @@ void UiSmokeTests::dashboardLinksToLibrary()
 
 void UiSmokeTests::brandingComesFromConfiguration()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     QCOMPARE(window.windowTitle(), launcher::branding::displayName());
     QCOMPARE(find<QLabel>(window, "BrandName")->text(), launcher::branding::productName());
     QVERIFY(find<QLabel>(window, "SidebarVersion")->text().contains(launcher::branding::version()));
@@ -297,7 +342,7 @@ void UiSmokeTests::brandImagesAreEmbedded()
     }
 
     // The sidebar and the dashboard actually show the images.
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     QVERIFY(!find<QLabel>(window, "BrandEmblem")->pixmap().isNull());
     QVERIFY(!find<QLabel>(window, "WelcomeLogo")->pixmap().isNull());
     QVERIFY(!window.windowIcon().isNull());
@@ -309,7 +354,7 @@ void UiSmokeTests::settingsControlsShowStoredValues()
     QVERIFY(m_settings->setUpdateCheckIntervalMinutes(360));
     QVERIFY(m_settings->setStartPage(StartPage::Library));
 
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     QVERIFY(!find<QAbstractButton>(window, "RegistryAutoCheck")->isChecked());
     QVERIFY(find<QAbstractButton>(window, "LauncherUpdateAutoCheck")->isChecked());
     QCOMPARE(find<QComboBox>(window, "CheckInterval")->currentData().toInt(), 360);
@@ -320,7 +365,7 @@ void UiSmokeTests::settingsControlsShowStoredValues()
 
 void UiSmokeTests::settingsControlsPersistChanges()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Settings);
@@ -354,7 +399,7 @@ void UiSmokeTests::settingsControlsPersistChanges()
 
 void UiSmokeTests::rendersEveryPage()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -396,7 +441,7 @@ void UiSmokeTests::rendersEveryPage()
 
 void UiSmokeTests::libraryExplainsThatNothingWasLoaded()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -413,7 +458,7 @@ void UiSmokeTests::libraryShowsProjectsFromTheCache()
     m_registry->loadCache();
     QCOMPARE(m_registry->projects().size(), 4);
 
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -447,7 +492,7 @@ void UiSmokeTests::libraryFiltersCombine()
 {
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -498,7 +543,7 @@ void UiSmokeTests::libraryKeepsTheStoredListWhenRefreshFails()
 {
     QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
     m_registry->loadCache();
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -517,7 +562,7 @@ void UiSmokeTests::libraryKeepsTheStoredListWhenRefreshFails()
 
 void UiSmokeTests::libraryShowsAnErrorWithoutAStoredList()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -543,7 +588,7 @@ void UiSmokeTests::libraryShowsAnErrorWithoutAStoredList()
 
 void UiSmokeTests::libraryRefreshButtonShowsLoadingState()
 {
-    MainWindow window(*m_paths, *m_settings, *m_registry);
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Library);
@@ -560,6 +605,106 @@ void UiSmokeTests::libraryRefreshButtonShowsLoadingState()
     QVERIFY(finished.wait(10000));
     QVERIFY(!m_registry->isLoading());
     QVERIFY(refresh->isEnabled());
+}
+
+void UiSmokeTests::downloadsPageStartsEmpty()
+{
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Downloads);
+
+    QVERIFY(find<QWidget>(window, "DownloadsEmpty")->isVisibleTo(&window));
+    QVERIFY(window.findChildren<QFrame*>(u"DownloadRow"_s).isEmpty());
+}
+
+void UiSmokeTests::downloadsPageShowsProgressAndCancels()
+{
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Downloads);
+
+    const launcher::DownloadId id =
+        m_downloads->enqueue(downloadRequest(u"/slow"_s, u"Slow.zip"_s, 600 * 1024, u"KERS Overlay 1.2.0"_s));
+    QTRY_VERIFY_WITH_TIMEOUT(m_downloads->download(id)->bytesReceived > 0, 10000);
+    QTest::qWait(250); // the page shows what the manager reports, a few times a second
+
+    const QList<QFrame*> rows = window.findChildren<QFrame*>(u"DownloadRow"_s);
+    QCOMPARE(rows.size(), 1);
+    QVERIFY(!find<QWidget>(window, "DownloadsEmpty")->isVisibleTo(&window));
+    QCOMPARE(find<QLabel>(*rows.first(), "DownloadTitle")->text(), u"KERS Overlay 1.2.0"_s);
+
+    const QString status = find<QLabel>(*rows.first(), "DownloadStatus")->text();
+    QVERIFY2(status.contains(u" von "_s), qPrintable(status));
+    auto* bar = find<QProgressBar>(*rows.first(), "DownloadProgress");
+    QVERIFY(bar);
+    QVERIFY(bar->value() > 200 && bar->value() < 500); // about a third of the file
+    saveScreenshot(window, u"downloads-running"_s);
+
+    // The button on the row cancels the download, and the row moves to the history.
+    auto* cancel = find<QAbstractButton>(*rows.first(), "DownloadCancel");
+    QVERIFY(cancel);
+    cancel->click();
+    QCOMPARE(m_downloads->download(id)->state, launcher::DownloadState::Cancelled);
+
+    const QList<QFrame*> after = window.findChildren<QFrame*>(u"DownloadRow"_s);
+    QCOMPARE(after.size(), 1);
+    QCOMPARE(find<QLabel>(*after.first(), "DownloadStatus")->text(), u"Abgebrochen"_s);
+    QVERIFY(find<QAbstractButton>(*after.first(), "DownloadCancel") == nullptr);
+    QVERIFY(find<QProgressBar>(*after.first(), "DownloadProgress") == nullptr);
+}
+
+void UiSmokeTests::downloadsPageShowsFinishedAndFailedDownloads()
+{
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Downloads);
+
+    const launcher::DownloadId good =
+        m_downloads->enqueue(downloadRequest(u"/ok"_s, u"Good.zip"_s, 50 * 1024, u"Setup Sharing 2.0.1"_s));
+    const launcher::DownloadId bad =
+        m_downloads->enqueue(downloadRequest(u"/missing"_s, u"Bad.zip"_s, 50 * 1024, u"Lap Timer 0.4.0"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(m_downloads->download(good)->state, launcher::DownloadState::Finished, 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(m_downloads->download(bad)->state, launcher::DownloadState::Failed, 10000);
+    QTest::qWait(100);
+
+    // The history lists the newest entry first.
+    const QList<QFrame*> rows = window.findChildren<QFrame*>(u"DownloadRow"_s);
+    QCOMPARE(rows.size(), 2);
+    QCOMPARE(find<QLabel>(*rows.at(0), "DownloadTitle")->text(), u"Lap Timer 0.4.0"_s);
+    const QString failed = find<QLabel>(*rows.at(0), "DownloadStatus")->text();
+    QVERIFY2(failed.startsWith(u"Fehlgeschlagen: "_s) && failed.contains(u"HTTP 404"_s), qPrintable(failed));
+
+    QCOMPARE(find<QLabel>(*rows.at(1), "DownloadTitle")->text(), u"Setup Sharing 2.0.1"_s);
+    QVERIFY(find<QLabel>(*rows.at(1), "DownloadStatus")->text().startsWith(u"Abgeschlossen"_s));
+
+    // Finished and failed entries have neither a progress bar nor a cancel button.
+    QVERIFY(window.findChildren<QProgressBar*>().isEmpty());
+    QVERIFY(window.findChildren<QAbstractButton*>(u"DownloadCancel"_s).isEmpty());
+    saveScreenshot(window, u"downloads-history"_s);
+}
+
+void UiSmokeTests::downloadsPageClearsTheHistory()
+{
+    MainWindow window(*m_paths, *m_settings, *m_registry, *m_downloads);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Downloads);
+
+    const launcher::DownloadId id =
+        m_downloads->enqueue(downloadRequest(u"/missing"_s, u"Bad.zip"_s, 50 * 1024, u"Lap Timer 0.4.0"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(m_downloads->download(id)->state, launcher::DownloadState::Failed, 10000);
+    QCOMPARE(window.findChildren<QFrame*>(u"DownloadRow"_s).size(), 1);
+
+    auto* clear = find<QAbstractButton>(window, "DownloadsClear");
+    QVERIFY(clear->isVisibleTo(&window));
+    clear->click();
+
+    QVERIFY(window.findChildren<QFrame*>(u"DownloadRow"_s).isEmpty());
+    QVERIFY(m_downloads->downloads().isEmpty());
+    QVERIFY(find<QWidget>(window, "DownloadsEmpty")->isVisibleTo(&window));
 }
 
 QTEST_MAIN(UiSmokeTests)

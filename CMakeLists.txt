@@ -54,22 +54,36 @@ endfunction()
 qt_add_library(launcher_core STATIC
     src/app/Branding.cpp
     src/app/Branding.h
+    src/core/Format.cpp
+    src/core/Format.h
     src/core/JsonFile.cpp
     src/core/JsonFile.h
     src/core/Logger.cpp
     src/core/Logger.h
     src/core/PathManager.cpp
     src/core/PathManager.h
+    src/core/SemVer.cpp
+    src/core/SemVer.h
     src/core/SettingsManager.cpp
     src/core/SettingsManager.h
+    src/downloads/DownloadManager.cpp
+    src/downloads/DownloadManager.h
+    src/downloads/TransferRate.cpp
+    src/downloads/TransferRate.h
     src/github/GitHubClient.cpp
     src/github/GitHubClient.h
     src/github/RegistryManager.cpp
     src/github/RegistryManager.h
     src/github/RegistryParser.cpp
     src/github/RegistryParser.h
+    src/github/ReleaseManager.cpp
+    src/github/ReleaseManager.h
+    src/github/ReleaseParser.cpp
+    src/github/ReleaseParser.h
+    src/models/Download.h
     src/models/LauncherSettings.h
     src/models/Project.h
+    src/models/Release.h
 )
 target_include_directories(launcher_core
     PUBLIC src

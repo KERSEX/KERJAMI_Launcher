@@ -42,7 +42,7 @@ bool matchesWhole(const QString& pattern, const QString& text)
 }
 
 /// "con", "CON.txt" and "Com1.exe" all name a device on Windows.
-bool isReservedWindowsName(const QString& name)
+bool isDeviceName(const QString& name)
 {
     const QString base = name.section(u'.', 0, 0).toUpper();
     if (base == "CON"_L1 || base == "PRN"_L1 || base == "AUX"_L1 || base == "NUL"_L1)
@@ -252,6 +252,11 @@ RegistryParseResult failure(RegistryParseResult::Status status, const QString& e
 } // namespace
 
 namespace RegistryParser {
+
+bool isReservedWindowsName(const QString& name)
+{
+    return isDeviceName(name);
+}
 
 bool isValidProjectId(const QString& id)
 {

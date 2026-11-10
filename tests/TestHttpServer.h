@@ -28,14 +28,18 @@ public:
     struct Response {
         enum class Behavior {
             Respond,
-            Hang,               ///< Accept the request and never answer.
-            CloseWithoutAnswer, ///< Hang up right after the request.
+            Hang,                ///< Accept the request and never answer.
+            CloseWithoutAnswer,  ///< Hang up right after the request.
+            SendPartialThenHang, ///< Send the headers and the first partialBytes of the body, then stay
+                                 ///< silent.
+            SendPartialThenClose ///< Send the same, then hang up before the announced length is reached.
         };
 
         int status = 200;
         QByteArray body;
         QList<QPair<QByteArray, QByteArray>> headers;
         Behavior behavior = Behavior::Respond;
+        qint64 partialBytes = 0; ///< Used by the two partial behaviours.
 
         void addHeader(const QByteArray& name, const QByteArray& value)
         {
@@ -111,8 +115,14 @@ private:
             socket->disconnectFromHost();
             return;
         case Response::Behavior::Respond:
+        case Response::Behavior::SendPartialThenHang:
+        case Response::Behavior::SendPartialThenClose:
             break;
         }
+
+        // The announced length is always the full body; the partial behaviours deliver less of it.
+        const bool partial = response.behavior == Response::Behavior::SendPartialThenHang
+            || response.behavior == Response::Behavior::SendPartialThenClose;
 
         QByteArray out =
             "HTTP/1.1 " + QByteArray::number(response.status) + ' ' + reason(response.status) + "\r\n";
@@ -121,9 +131,10 @@ private:
         for (const auto& [name, value] : response.headers)
             out += name + ": " + value + "\r\n";
         out += "\r\n";
-        out += response.body;
+        out += partial ? response.body.left(response.partialBytes) : response.body;
         socket->write(out);
-        socket->disconnectFromHost();
+        if (response.behavior != Response::Behavior::SendPartialThenHang)
+            socket->disconnectFromHost();
     }
 
     static QByteArray reason(int status)

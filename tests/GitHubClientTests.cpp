@@ -11,9 +11,13 @@
 
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
+#include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
 
@@ -111,6 +115,14 @@ private slots:
     void redirectLoopStops();
 
     void abortReportsExactlyOnce();
+
+    void bodyCanBeSavedToAFile();
+    void progressFollowsTheBytesWritten();
+    void everyAttemptStartsTheFileAnew();
+    void redirectAndErrorPagesAreNotWrittenToTheFile();
+    void savingStopsAtTheSizeLimit();
+    void unwritableTargetIsAFileError();
+
     void liveGitHub();
 };
 
@@ -535,6 +547,163 @@ void GitHubClientTests::abortReportsExactlyOnce()
     QTest::qWait(200);
     QCOMPARE(reports, 1);
     QCOMPARE(server.requestCount(), 1); // no retry after an abort
+}
+
+// ---- Saving the body to a file -----------------------------------------------
+
+namespace {
+
+QByteArray payload(qint64 size)
+{
+    QByteArray data(size, '\0');
+    for (qint64 i = 0; i < size; ++i)
+        data[i] = static_cast<char>((i * 31 + 7) & 0xFF);
+    return data;
+}
+
+QByteArray readFile(const QString& path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+} // namespace
+
+void GitHubClientTests::bodyCanBeSavedToAFile()
+{
+    const QByteArray data = payload(500 * 1024);
+    TestHttpServer server([&data](const Request&) { return answer(200, data); });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    FetchOptions options = quickOptions();
+    options.saveToFile = dir.filePath(u"out.bin"_s);
+    GitHubClient client(localPolicy());
+    const NetworkResult result = fetch(client, server.url(), options);
+
+    QVERIFY2(result.ok(), qPrintable(result.detail));
+    QVERIFY(result.body.isEmpty()); // nothing is kept in memory
+    QCOMPARE(result.bytesReceived, static_cast<qint64>(data.size()));
+    QCOMPARE(readFile(options.saveToFile), data);
+}
+
+void GitHubClientTests::progressFollowsTheBytesWritten()
+{
+    const QByteArray data = payload(2 * 1024 * 1024);
+    TestHttpServer server([&data](const Request&) { return answer(200, data); });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    FetchOptions options = quickOptions();
+    options.saveToFile = dir.filePath(u"out.bin"_s);
+    GitHubClient client(localPolicy());
+
+    QList<qint64> received;
+    QList<qint64> totals;
+    QPointer<GitHubRequest> request = client.get(server.url(), options);
+    connect(request, &GitHubRequest::downloadProgress, this, [&](qint64 bytes, qint64 total) {
+        received.append(bytes);
+        totals.append(total);
+    });
+    QSignalSpy finished(request, &GitHubRequest::finished);
+    QVERIFY(finished.wait(10000));
+
+    QVERIFY(!received.isEmpty());
+    for (qsizetype i = 1; i < received.size(); ++i)
+        QVERIFY2(received.at(i) > received.at(i - 1), "progress went backwards or repeated");
+    QCOMPARE(received.last(), static_cast<qint64>(data.size()));
+    QCOMPARE(totals.last(), static_cast<qint64>(data.size())); // from the announced length
+}
+
+void GitHubClientTests::everyAttemptStartsTheFileAnew()
+{
+    const QByteArray data = payload(300 * 1024);
+    int calls = 0;
+    TestHttpServer server([&](const Request&) {
+        Response response = answer(200, data);
+        if (++calls == 1) {
+            response.behavior = Response::Behavior::SendPartialThenClose;
+            response.partialBytes = 100 * 1024;
+        }
+        return response;
+    });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    FetchOptions options = quickOptions();
+    options.saveToFile = dir.filePath(u"out.bin"_s);
+    GitHubClient client(localPolicy());
+    const NetworkResult result = fetch(client, server.url(), options);
+
+    QVERIFY2(result.ok(), qPrintable(result.detail));
+    QCOMPARE(result.attempts, 2);
+    // Not the 100 KB of the first try followed by the whole file.
+    QCOMPARE(readFile(options.saveToFile), data);
+}
+
+void GitHubClientTests::redirectAndErrorPagesAreNotWrittenToTheFile()
+{
+    const QByteArray data = payload(10 * 1024);
+    TestHttpServer server([&data](const Request& request) {
+        if (request.path == u"/moved"_s)
+            return redirect(u"/real"_s);
+        if (request.path == u"/real"_s)
+            return answer(200, data);
+        return answer(404, "<html>Not Found</html>");
+    });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GitHubClient client(localPolicy());
+
+    FetchOptions options = quickOptions();
+    options.saveToFile = dir.filePath(u"moved.bin"_s);
+    QVERIFY(fetch(client, server.url(u"/moved"_s), options).ok());
+    QCOMPARE(readFile(options.saveToFile), data);
+
+    options.saveToFile = dir.filePath(u"missing.bin"_s);
+    const NetworkResult missing = fetch(client, server.url(u"/nothing"_s), options);
+    QCOMPARE(missing.error, NetworkError::HttpError);
+    QCOMPARE(QFileInfo(options.saveToFile).size(), 0LL); // the error page is not part of any download
+}
+
+void GitHubClientTests::savingStopsAtTheSizeLimit()
+{
+    const QByteArray data = payload(200 * 1024);
+    TestHttpServer server([&data](const Request&) { return answer(200, data); });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    FetchOptions options = quickOptions();
+    options.maxBytes = 1000;
+    options.saveToFile = dir.filePath(u"out.bin"_s);
+    GitHubClient client(localPolicy());
+    const NetworkResult result = fetch(client, server.url(), options);
+
+    QCOMPARE(result.error, NetworkError::TooLarge);
+    QVERIFY(QFileInfo(options.saveToFile).size() <= options.maxBytes);
+    QCOMPARE(server.requestCount(), 1); // too large is no reason to try again
+}
+
+void GitHubClientTests::unwritableTargetIsAFileError()
+{
+    TestHttpServer server([](const Request&) { return answer(200, "data"); });
+    QVERIFY(server.listen());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    FetchOptions options = quickOptions();
+    options.saveToFile = dir.filePath(u"no-such-folder/out.bin"_s);
+    GitHubClient client(localPolicy());
+    const NetworkResult result = fetch(client, server.url(), options);
+
+    QCOMPARE(result.error, NetworkError::FileError);
+    QCOMPARE(server.requestCount(), 0); // no point in asking for data that cannot be kept
+    QVERIFY(!result.detail.isEmpty());
 }
 
 void GitHubClientTests::liveGitHub()

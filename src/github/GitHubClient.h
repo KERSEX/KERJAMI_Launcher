@@ -3,10 +3,13 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QObject>
 #include <QPointer>
 #include <QStringList>
 #include <QUrl>
+
+#include <memory>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -22,6 +25,7 @@ enum class NetworkError {
     HttpError,     ///< The server answered with an error status.
     RateLimited,   ///< GitHub's request limit is used up.
     TooLarge,      ///< The response is larger than the caller allows.
+    FileError,     ///< The target file could not be opened or written (disk full, no permission).
     TooManyRedirects,
     Aborted, ///< Cancelled by the caller.
 };
@@ -43,14 +47,20 @@ struct FetchOptions {
     int retryDelayMs = 500;            ///< Pause before the second try, doubled for each further one.
     int maxRedirects = 5;
     QByteArray accept = "application/json";
+
+    /// If set, the response body is written to this file while it arrives instead
+    /// of being kept in memory, and NetworkResult::body stays empty. Every attempt
+    /// starts the file anew. The file is not removed when the request fails.
+    QString saveToFile;
 };
 
 struct NetworkResult {
     NetworkError error = NetworkError::None;
     int httpStatus = 0; ///< 0 if no HTTP response arrived.
     QByteArray body;
-    QUrl finalUrl;  ///< Address of the last request, after redirects.
-    QString detail; ///< Technical detail for the log.
+    qint64 bytesReceived = 0; ///< Body bytes of the last attempt, in memory or in the file.
+    QUrl finalUrl;            ///< Address of the last request, after redirects.
+    QString detail;           ///< Technical detail for the log.
     int attempts = 0;
     RateLimit rateLimit; ///< From the last response, if it carried the headers.
 
@@ -74,6 +84,11 @@ signals:
     /// Emitted exactly once, never before get() has returned.
     void finished(const launcher::NetworkResult& result);
 
+    /// Body bytes written so far in the current attempt and the expected total
+    /// (-1 if the server did not say). Only for requests that save to a file
+    /// and only for successful (2xx) answers.
+    void downloadProgress(qint64 received, qint64 total);
+
 private:
     friend class GitHubClient;
     GitHubRequest(GitHubClient* client, const QUrl& url, const FetchOptions& options);
@@ -81,6 +96,7 @@ private:
     void begin();
     void send();
     void onFinished();
+    void drain(QNetworkReply* reply);
     void retryOrFail(const NetworkResult& failure, bool retryable);
     void complete(NetworkResult result);
 
@@ -91,10 +107,14 @@ private:
     QPointer<QNetworkReply> m_reply;
     QTimer* m_retryTimer;
     QElapsedTimer m_clock;
+    std::unique_ptr<QFile> m_file;
+    QString m_fileError;
+    qint64 m_written = 0;
     int m_attempts = 0;
     int m_redirects = 0;
     bool m_done = false;
     bool m_tooLarge = false;
+    bool m_writeFailed = false;
 };
 
 /// The only place that talks to the network.

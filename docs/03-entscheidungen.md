@@ -314,6 +314,102 @@ Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
 - Installationsstatus, Versionen und Aktionen auf den Karten kommen mit den Phasen 3 bis 5, die
   Detailseite mit Phase 7.
 
+### D-21 Versionen und Tags
+
+- Versionen folgen Semantic Versioning 2.0.0 streng, mit einem optionalen `v` oder `V` davor (so
+  heißen Git-Tags). Andere Präfixe wie `KERS_SubsystemsV0.3.1` gelten nicht als Version (siehe D-14).
+- Führende Nullen (`01.2.3`), Zahlen mit mehr als neun Stellen, Leerzeichen und Zeilenumbrüche
+  machen eine Version ungültig.
+- Reihenfolge nach der Spezifikation: erst Haupt-, Neben- und Patch-Zahl als Zahlen
+  (`1.9.0 < 1.10.0`), eine Vorabversion steht unter der Version, zu der sie führt
+  (`1.0.0-rc.1 < 1.0.0`), Build-Metadaten (`+…`) zählen nicht. Die Beispielreihe der Spezifikation
+  ist als Test hinterlegt.
+- Ein Release mit Vorabversion im Tag (`v1.0.0-beta.1`) ist nicht stabil, auch wenn GitHub es nicht
+  als Pre-Release markiert hat.
+
+### D-22 Abfrage der Releases
+
+- Eine Anfrage `GET /repos/<Owner>/<Repo>/releases?per_page=30` je Projekt. `/releases/latest` ist
+  ungeeignet: Es wählt nach Datum und nicht nach Version, ein später veröffentlichter Hotfix einer
+  alten Version würde als neueste Version gelten.
+- Das neueste stabile Release ist das mit der **höchsten Version** in der Antwort, nicht das erste.
+  Bei gleicher Version gewinnt der erste Eintrag.
+- Ausgewertet werden die ersten 30 Releases. Ist darunter kein stabiles, gilt das Projekt als „ohne
+  Release“.
+- Das Budget von 60 Anfragen pro Stunde ohne Anmeldung reicht nicht für die ganze Registry. Es wird
+  deshalb nur bei Bedarf abgefragt: für ein geöffnetes Projekt und für installierte Projekte bei der
+  Update-Prüfung, nie für alle 500 auf einmal.
+- Owner, Repository, Projekt-ID und Asset-Muster werden vor dem Bau der Adresse erneut geprüft,
+  gleichgültig, woher das Projekt kommt. Ungültige Projekte lösen keine Anfrage aus.
+- Release-Notes werden als Klartext (Markdown-Quelltext) übernommen, höchstens 20.000 Zeichen. Es
+  wird kein HTML erzeugt.
+- Beobachtung: Die Liste von 30 Releases eines Projekts mit ausführlichen Notes ist rund 400 KB groß.
+  Das Limit für diese Antwort liegt bei 4 MiB.
+
+### D-23 Auswahl der Datei und Prüfsumme
+
+- Im neuesten stabilen Release muss **genau eine** Datei zum `asset_pattern` passen. Keine Datei:
+  „keine passende Datei“. Mehrere: „nicht eindeutig“. Es wird nicht geraten.
+- Fehlt die Datei im neuesten Release, wird **nicht** auf ein älteres zurückgegriffen. Ein Release,
+  dessen Dateien noch hochgeladen werden, würde sonst eine alte Version als Update anbieten.
+- Eine Datei zählt nur, wenn sie fertig hochgeladen ist (`state: uploaded`), einen sicheren Dateinamen
+  hat (kein Pfad, kein reservierter Windows-Name, höchstens 128 Zeichen) und zwischen 1 Byte und
+  2 GiB groß ist. Unbrauchbare Dateien fallen einzeln heraus, das Release bleibt.
+- Das Muster kennt nur `*`. Alles andere, auch `?` und `[`, gilt wörtlich. Groß- und Kleinschreibung
+  wird nicht unterschieden.
+- **Die Download-Adresse wird gebaut**, nicht übernommen: `https://github.com/<Owner>/<Repo>/
+  releases/download/<Tag>/<Datei>` aus geprüften Teilen. Die Adresse, die die API-Antwort nennt, wird
+  ignoriert (ein Test lässt sie auf einen fremden Host zeigen).
+- **Prüfsumme:** Der Digest `sha256:<64 Hexzeichen>` der API wird als Kleinbuchstaben übernommen. Jede
+  andere Form zählt als „kein Digest“. Beobachtung: Dateien, die vor der Einführung der Digests
+  hochgeladen wurden, haben keinen (so auch das aktuelle Release von `nlohmann/json`). Ein solches
+  Asset lässt sich nicht prüfen. Phase 4 entscheidet, was daraus folgt (Vorgabe: nicht installieren).
+  Als zweite Quelle ist eine Prüfsummendatei `<Datei>.sha256` im selben Release vorgesehen.
+
+### D-24 Ablauf und Regeln der Downloads
+
+- Ein Download wird in `temp/download-<id>.part` geschrieben, auf genau die angekündigte Größe
+  geprüft und dann nach `downloads/<Projekt-ID>/<Datei>` verschoben. Eine ältere Datei gleichen
+  Namens wird ersetzt.
+- Bei Fehler oder Abbruch bleibt keine Datei zurück. Beim Start werden übrig gebliebene
+  `download-*.part` aus `temp/` gelöscht, andere Dateien dort nicht.
+- Anfrage prüfen: Projekt-ID, Dateiname, Größe (1 Byte bis 2 GiB) und Adresse (URL-Policy). Eine
+  ungültige Anfrage wird sofort zu einem fehlgeschlagenen Eintrag, ohne Netzwerkzugriff.
+- Das Limit der Antwort ist die angekündigte Größe. Sendet der Server mehr, wird abgebrochen
+  („größer als angekündigt“), sendet er weniger, scheitert die Größenprüfung.
+- Vor dem Start muss auf dem Laufwerk Platz für die Datei plus 16 MiB sein, sonst scheitert der
+  Download sofort mit „nicht genug Speicherplatz“. Kann der freie Platz nicht ermittelt werden, wird
+  nicht geprüft.
+- Standardmäßig laufen zwei Downloads gleichzeitig, weitere warten in der Reihenfolge des Eintreffens.
+  Dieselbe Datei desselben Projekts wird nicht doppelt gestartet: Der zweite Aufruf liefert den
+  laufenden Eintrag zurück.
+- **Abbrechen ist kein Fehler.** Ein abgebrochener Download meldet weder `finished` noch `failed`.
+- Eine unterbrochene Übertragung beginnt beim nächsten Versuch von vorn. Fortsetzen (HTTP Range)
+  gibt es nicht.
+- Die Datei liegt nach dem Download ungeprüft in `downloads/`. Sie wird weder gestartet noch
+  entpackt, bevor Phase 4 die SHA-256-Prüfung bestanden hat.
+- Die Liste der Downloads hält höchstens 100 beendete Einträge und gilt nur für die laufende Sitzung.
+
+### D-25 Fortschritt und Geschwindigkeit
+
+- **Beobachtung:** Qt meldet `downloadProgress` bei einer stockenden Übertragung erst Sekunden nach
+  dem Eintreffen der Daten, im Test erst beim Timeout nach zwei Sekunden, obwohl `readyRead` die Daten
+  nach 67 ms lieferte. Darauf ist keine Anzeige zu bauen.
+- Der Fortschritt zählt deshalb die Bytes, die der Client selbst in die Datei schreibt, und kennt die
+  Gesamtgröße aus dem angekündigten Content-Length.
+- Das Tempo ist ein geglätteter Mittelwert (30 % neue Messung, 70 % bisheriger Wert), gemessen in
+  Abständen von mindestens 250 ms. Ein Zurückspringen der Bytezahl (neuer Versuch) startet die
+  Messung neu. Die Restzeit ergibt sich aus Tempo und Rest und wird aufgerundet.
+- Die Oberfläche bekommt Fortschritt höchstens etwa zehnmal pro Sekunde und Download.
+
+### D-26 Downloads-Seite
+
+Zwei Bereiche: „Aktiv“ (Warteschlange und laufende Downloads, mit Fortschrittsbalken, Tempo,
+Restzeit und „Abbrechen“) und „Verlauf“ (neueste zuerst, mit „Verlauf leeren“). Fehlertexte nennen
+den Grund in Klartext („Keine Verbindung“, „Nicht genug freier Speicherplatz“, „Die Datei wurde nicht
+gefunden (HTTP 404)“ und so weiter). Ohne Einträge zeigt die Seite einen Leerzustand. Ein Knopf zum
+Starten eines Downloads kommt mit der Installation in Phase 4.
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch. Symbolische Links und Junctions werden
@@ -340,3 +436,10 @@ Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
   (`LAUNCHER_LIVE_TESTS=1`); damit lässt sich prüfen, ob die Registry es verbraucht.
 - Die Bibliothek baut bei jeder Änderung alle Karten neu. Bei der Obergrenze von 500 Projekten ist
   das unkritisch.
+- Von der Release-Liste eines Repositories werden die ersten 30 Einträge gelesen. Eine Seitenabfrage
+  gibt es nicht.
+- Die Antwort der Release-Liste wird vollständig im Speicher gelesen (bis 4 MiB). Downloads dagegen
+  werden direkt in die Datei geschrieben.
+- Der Live-Test der Release-Abfrage (`LAUNCHER_LIVE_TESTS=1`) liest die Release-Liste von
+  `nlohmann/json`, einem fremden öffentlichen Repository, und lädt keine Datei herunter. Es gibt
+  keinen Test, der eine echte Datei von GitHub lädt: Dafür fehlt noch das Testprojekt (E-02).
