@@ -388,6 +388,9 @@ void RegistryTests::invalidEntryIsDroppedAndOthersSurvive_data()
     row("directory with drive", u"install_directory"_s, quoted(u"C:"_s));
     row("directory with umlaut", u"install_directory"_s, quoted(u"Übung"_s));
     row("directory empty", u"install_directory"_s, u"\"\""_s);
+
+    // The launcher keeps this id for its own updates; a project with it would share their folder.
+    row("id reserved for the launcher", u"id"_s, quoted(u"launcher"_s));
 }
 
 void RegistryTests::invalidEntryIsDroppedAndOthersSurvive()

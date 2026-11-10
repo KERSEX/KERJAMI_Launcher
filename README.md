@@ -14,16 +14,22 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Die Phasen 1 bis 5 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Die Phasen 1 bis 6 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
 Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die Projekt-Registry mit
 Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version, die
 Download-Warteschlange mit Fortschritt und die Installation: SHA-256-Prüfung, ZIP-Prüfung und
 sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden in
 der Bibliothek installiert, gestartet und entfernt. Der Launcher erkennt laufende Projekte und
 prüft installierte Projekte auf neue Versionen: je Projekt manuell (Hinweis und Rückfrage) oder
-automatisch (wird installiert, sobald das Projekt geschlossen ist). Das Selbstupdate des Launchers
-folgt. Details stehen in
+automatisch (wird installiert, sobald das Projekt geschlossen ist). Der Launcher aktualisiert sich
+selbst: Er lädt das neue Release, prüft es gegen Prüfsumme und Manifest und übergibt an
+`LauncherUpdater.exe`, die die Programmdateien nach dem Beenden in einer Transaktion mit Backup und
+Rollback austauscht und den Launcher neu startet. Offen sind die UI-Fertigstellung (Phase 7) und das
+portable Release (Phase 8). Details stehen in
 [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
+
+Bekanntes Problem: Windows Defender meldet die nicht signierte `LauncherUpdater.exe` fälschlich als
+Schadsoftware. Siehe [docs/03-entscheidungen.md](docs/03-entscheidungen.md), „Bekannte Grenzen“.
 
 ## Bauen
 
@@ -66,7 +72,10 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `InstallServiceTests` | Die ganze Kette gegen einen lokalen Server, falsche Hashes, Abbruch, Vorbereiten |
 | `ProcessTests` | Start, Mehrfachstart, Prozessende, von außen gestartete Projekte, Nachkommen |
 | `UpdateTests` | Update-Prüfung, manuell und automatisch, laufende Projekte, Fehler, Warteschlange |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten und Update-Anzeige, Downloads-Seite |
+| `UpdateTransactionTests` | Manifest-Parser, Austausch der Programmdateien mit Backup, Rollback, Absturz mittendrin und Wiederherstellung |
+| `UpdaterTests` | Die echte `LauncherUpdater.exe`: Austausch, Warten auf den Launcher, Ablehnung, Bericht, Neustart |
+| `LauncherUpdateTests` | Launcher-Update: Prüfung, feindliche Pakete, Abbruch, Übergabe, Selbstupdate von Anfang bis Ende |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten und Update-Anzeige, Downloads-Seite, Launcher-Update |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 `build\release\screenshots` ab.
@@ -82,7 +91,8 @@ src/downloads/         Download-Warteschlange
 src/security/          SHA-256, ZIP-Leser, Archiv-Prüfung
 src/installer/         Installer, Deinstallation, Liste der Installationen, Start
 src/process/           Prozessüberwachung
-src/updater/           Update-Prüfung der Projekte
+src/updater/           Update-Prüfung der Projekte, Selbstupdate des Launchers, Manifest, Austausch
+updater/               LauncherUpdater.exe (nur Qt Core, ohne Fenster und Netzwerk)
 src/models/            Datentypen
 src/ui/                Hauptfenster, Seiten, Controls, Theme
 resources/images/      Logo und Icons (erzeugt aus logo-source.png)
@@ -96,10 +106,12 @@ docs/                  Bestandsaufnahme, Plan, Entscheidungen
 
 ```
 KERJAMI.exe
+LauncherUpdater.exe
 launcher/     Einstellungen und Launcher-Status
 library/      installierte Projekte
 downloads/    heruntergeladene Archive bis zur Installation
-temp/         Teil-Downloads, Staging, entfernte Projekte vor dem Löschen
+temp/         Teil-Downloads, Staging, entfernte Projekte vor dem Löschen, Launcher-Update
+updater/      Journal, Backups und Bericht des Selbstupdates
 cache/        Registry- und Release-Cache
 logs/         Logdateien
 ```

@@ -5,21 +5,25 @@ Schnittstellen und die Reihenfolge fest. Stand der Phasen steht am Ende.
 
 ## Architektur
 
-Drei Schichten, Abhängigkeiten zeigen nur nach unten:
+Vier Schichten, Abhängigkeiten zeigen nur nach unten:
 
 ```
-launcher (EXE)        main.cpp, Application          Startsequenz, Fehlerdialoge
+launcher (EXE)         main.cpp, Application          Startsequenz, Fehlerdialoge
    │
-launcher_ui (static)  MainWindow, Seiten, Controls   Qt Widgets, kein Netzwerk, keine Dateilogik
+launcher_ui (static)   MainWindow, Seiten, Controls   Qt Widgets, kein Netzwerk, keine Dateilogik
    │
-launcher_core (static) Branding, PathManager,        Qt Core (ab Phase 2 zusätzlich Qt Network)
-                       SettingsManager, Logger,
-                       später: github/, downloads/,
-                       installer/, updater/, security/, process/
+launcher_core (static) Branding, SettingsManager,     Qt Core + Network: github/, downloads/,
+                       Manager und Dienste            installer/, process/, updater/
+   │
+launcher_base (static) PathManager, Logger, JsonFile, Qt Core: alles, was auch der Updater braucht
+                       SemVer, FileOps, HashVerifier,
+                       ArchiveValidator, RegistryParser,
+                       UpdateManifest, UpdateTransaction,
+                       UpdaterProtocol
 ```
 
-`LauncherUpdater.exe` (Phase 6) linkt nur `launcher_core`. Die Tests linken `launcher_core`,
-der UI-Test zusätzlich `launcher_ui`.
+`LauncherUpdater.exe` (Phase 6) linkt nur `launcher_base`: kein Netzwerk, keine Fenster. Die Tests
+linken `launcher_core`, der UI-Test zusätzlich `launcher_ui`.
 
 Regeln:
 
@@ -46,7 +50,11 @@ Regeln:
 │   ├── current/                 aktive Installation
 │   └── backups/<Version>/       die zwei zuletzt ersetzten Versionen für Rollback
 ├── downloads/<Projekt>/         heruntergeladene ZIPs, bis zur Installation
-├── temp/                        download-<id>.part, staging-<Projekt>/, uninstall-<Projekt>/
+├── downloads/launcher/          das Release-ZIP des Launchers, bis es geprüft ist (Phase 6)
+├── temp/                        download-<id>.part, staging-<Projekt>/, uninstall-<Projekt>/,
+│                                update-<Version>/ (entpacktes Launcher-Release),
+│                                updater-<Version>/ (die laufende Kopie des Updaters)
+├── updater/                     Journal, Backups der ersetzten Programmdateien, Bericht, Sperre (Phase 6)
 ├── cache/                       Registry-Cache, Release-Antworten
 └── logs/                        launcher.log, updater.log
 ```
@@ -311,14 +319,58 @@ Changelog, „Updates: Manuell/Automatisch“, den Zustand „läuft“ und uner
 Der Start löscht außerdem übrig gebliebene Archive in `downloads/<Projekt>/`. Entscheidungen und
 Grenzen: [03-entscheidungen.md](03-entscheidungen.md), D-35 bis D-38.
 
-### Phase 6 – Selbstupdate
+### Phase 6 – Selbstupdate (umgesetzt)
 
-`LauncherUpdateManager` lädt und prüft das Release-ZIP und entpackt es nach `temp/`. Danach
-kopiert er `LauncherUpdater.exe` nach `temp/updater-<version>/` und startet diese Kopie. Der
-Updater wartet auf das Prozessende des Launchers (Handle auf die PID), sichert die Dateien aus
-dem Manifest des Releases, tauscht sie und startet den Launcher neu. Weil die laufende
-Updater-Kopie außerhalb der Programmdateien liegt, kann auch `LauncherUpdater.exe` selbst
-ersetzt werden. Der Updater fasst nur Dateien an, die im Manifest stehen.
+Das Release-Asset des Launchers heißt `KERJAMI-<Version>-Windows-x64-Portable.zip`
+(`branding::updateAssetPattern()`). Es enthält die Programmdateien an der Wurzel und die Datei
+`update-manifest.json` (D-39).
+
+```cpp
+enum class LauncherUpdateState { Idle, Checking, UpToDate, Available, Downloading, Preparing, Ready, Applying, Failed };
+class LauncherUpdateManager : public QObject {    // updater/, D-41
+    void start();  void checkNow();                           // erste Prüfung nach 3 s, dann im Intervall
+    LauncherUpdateInfo info() const;                          // Zustand, Versionen, Fortschritt, Fehler
+    void install();                                           // laden, prüfen, entpacken; danach folgt apply()
+    void cancel();
+    void apply();                                             // Updater vorbereiten und starten, Launcher beendet sich
+    void setBusyCheck(std::function<bool()>);                 // laufende Installationen blockieren den Neustart
+signals: void infoChanged();  void restartRequested();
+};
+
+struct PackageRequest { /* ZIP, Hash, Staging-Ordner, Erwartungen */ };
+namespace UpdatePackage { PackageResult prepare(const PackageRequest&, cancel, progress); }   // D-39
+
+// launcher_base, gemeinsam mit dem Updater
+namespace UpdateManifestFormat { ManifestParseResult parse(json, ManifestExpectations); }     // D-39
+namespace UpdateTransaction {                                                                  // D-40
+    TransactionResult apply(const TransactionPlan&);                  // Journal, Backup, Austausch, Rollback
+    TransactionResult recover(const QString& rootDir, const QString& journalFile);
+}
+struct UpdaterJob { /* Ordner, Versionen, Dateinamen, PID des Launchers, Wartezeit */ };       // job.json
+struct UpdateReport { /* Status, Versionen, Detail, Backup */ };                               // last-update.json
+namespace UpdateStartup { StartupUpdateOutcome run(const PathManager&, int waitMs = 60000); }  // beim Start des Launchers
+
+// updater/LauncherUpdater.exe: --job <job.json> [--quiet]; Exitcodes 0 Erfolg, 1 zurückgerollt,
+// 2 nichts geändert, 3 fehlgeschlagen, 4 ungültiger Auftrag
+```
+
+Ablauf: Prüfung über dieselben Release-Abfragen wie bei Projekten (reservierte ID `launcher`, D-39) →
+„Aktualisieren“ mit Rückfrage (Changelog) → Download nach `downloads/launcher/` → SHA-256 →
+Archivprüfung → Entpacken nach `temp/update-<Version>/` → Manifest und Hash jeder Datei prüfen →
+Kopie von `LauncherUpdater.exe` nach `temp/updater-<Version>/` → Zustand „bereit“ → `apply()`:
+`job.json` schreiben, die Kopie starten, Launcher beenden. `apply()` folgt von selbst, sobald das Paket
+bereit ist und keine Projekt-Installation läuft; sonst wartet es auf „Jetzt neu starten“. Der
+Updater wartet auf das Prozessende des Launchers (Handle auf die PID), tauscht die Dateien aus dem
+Manifest in einer Transaktion (Journal, Backups, Rollback; die Programmdatei des Launchers zuletzt),
+schreibt `updater/last-update.json` und startet den Launcher neu. Weil die laufende Kopie in `temp/`
+liegt, kann auch `LauncherUpdater.exe` selbst ersetzt werden. Der Updater fasst nur Dateien an, die
+im Manifest stehen; die Ordner mit Nutzerdaten sind gesperrt. Beim nächsten Start räumt der Launcher
+auf: `UpdateStartup::run` wartet auf einen noch laufenden Updater, schließt eine unterbrochene
+Transaktion ab (`recover`) und zeigt den Bericht einmal an.
+
+Die Oberfläche zeigt den Stand auf dem Dashboard und in „Einstellungen → Über“
+(`ui/LauncherUpdatePanel`): „Nach Updates suchen“, „Aktualisieren“ mit Rückfrage, „Abbrechen“ und
+„Jetzt neu starten“ (nur wenn eine Installation den Neustart aufgehalten hat). Entscheidungen und Grenzen: [03-entscheidungen.md](03-entscheidungen.md), D-39 bis D-41.
 
 ### Phase 7 und 8
 
@@ -335,7 +387,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration, Einstellungen pro Projekt | 1, 5 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite | 1–5 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite, Anzeige des Launcher-Updates | 1–6 |
 | `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln | 2 |
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
@@ -347,7 +399,9 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `InstallServiceTests.cpp` | Die ganze Kette gegen einen lokalen Server: Hash-Quellen, falsche Hashes, feindliche Archive, Abbruch | 4 |
 | `ProcessTests.cpp` | Start, Mehrfachstart, Ende und Exitcode, Programm von außen gestartet, Nachkommen außerhalb des Ordners, Threads (mit dem Hilfsprogramm `SleepyApp`) | 5 |
 | `UpdateTests.cpp` | Prüfung, manuell und automatisch, laufendes Projekt, Vormerkung, Fehler, Warteschlange, Modi je Projekt, Netzwerkfehler | 5 |
-| Selbstupdate-Tests | | 6 |
+| `UpdateTransactionTests.cpp` | Manifest-Parser (Tabelle feindlicher Manifeste), Transaktion: Erfolg, Ablehnungen, Rollback bei jedem Schritt, Absturz nach jedem Schritt und `recover`, `UpdateStartup` | 6 |
+| `UpdaterTests.cpp` | Die echte `LauncherUpdater.exe` mit dem Hilfsprogramm `SleepyApp` als Launcher: Austausch, Warten auf das Prozessende, Ablehnung, Bericht, Neustart, Sperre | 6 |
+| `LauncherUpdateTests.cpp` | Prüfung und Zustände, feindliche Pakete, Abbruch, Busy, Übergabe an den Updater, Selbstupdate von Anfang bis Ende gegen einen lokalen Server | 6 |
 
 ## Stand
 
@@ -358,7 +412,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
 | 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; wie Phase 4 ohne Test gegen echte GitHub-Releases (E-02) |
-| 6 | Launcher-Selbstupdate | offen; braucht Releases in `KERSEX/KERJAMI_Launcher` |
+| 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `LauncherUpdater.exe` gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Windows Defender meldet den unsignierten Updater fälschlich als Schadsoftware (D-40, Bekannte Grenzen) |
 | 7 | UI-Fertigstellung | offen |
 | 8 | Portable Release | offen; braucht Entscheidung E-01 |
 

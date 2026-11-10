@@ -9,6 +9,8 @@
 //   exitcode   the file's text is the exit code the program ends with (default 0)
 //   spawn      the file's text is a folder: the program copies itself there as Child.exe and
 //              starts the copy, which also waits for the stop file next to the parent
+//   started.log  every start appends a line with the size of the program's own file, so a test
+//              can tell which version of the program was started
 //   mainexits  together with "spawn": the parent ends right after starting the child,
 //              the child keeps running (how a launcher stub starts the real program)
 
@@ -72,6 +74,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         if (std::wstring(argv[i]) == L"--control") {
             controlFolder = argv[i + 1];
             isChild = true;
+        }
+    }
+
+    if (!isChild) {
+        // A trace of this start: the size of the program file tells an old version from a new one.
+        WIN32_FILE_ATTRIBUTE_DATA data {};
+        if (GetFileAttributesExW(self, GetFileExInfoStandard, &data)) {
+            std::ofstream log((home + L"\\started.log").c_str(), std::ios::app);
+            log << data.nFileSizeLow << "\n";
         }
     }
 

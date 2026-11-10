@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/AppContext.h"
 #include "ui/Page.h"
 
 namespace launcher::ui {
@@ -9,7 +10,7 @@ class DashboardPage : public Page {
     Q_OBJECT
 
 public:
-    explicit DashboardPage(QWidget* parent = nullptr);
+    explicit DashboardPage(const AppContext& context, QWidget* parent = nullptr);
 
 signals:
     /// The user wants to browse the available projects.

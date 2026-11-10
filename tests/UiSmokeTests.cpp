@@ -22,8 +22,10 @@
 #include "ui/AppContext.h"
 #include "ui/Dialogs.h"
 #include "ui/MainWindow.h"
+#include "ui/OperationMessages.h"
 #include "ui/ProjectCard.h"
 #include "ui/Theme.h"
+#include "updater/LauncherUpdateManager.h"
 #include "updater/ProjectUpdateManager.h"
 
 #include <QAbstractButton>
@@ -147,6 +149,11 @@ private slots:
     void cardLetsTheUserChooseTheUpdateMode();
     void cardShowsARunningProjectAndAnUnexpectedEnd();
 
+    void launcherUpdatePanelsFollowTheManager();
+    void launcherUpdateAsksBeforeDownloadingAndCanBeCancelled();
+    void launcherUpdateFailuresAreExplained();
+    void startupMessagesAreWorded();
+
     void downloadsPageStartsEmpty();
     void downloadsPageShowsProgressAndCancels();
     void downloadsPageShowsFinishedAndFailedDownloads();
@@ -156,7 +163,7 @@ private:
     launcher::ui::AppContext context()
     {
         return {*m_paths, *m_settings, *m_registry, *m_downloads, *m_installed, *m_service, *m_processes,
-            *m_updates};
+            *m_updates, *m_launcherUpdates};
     }
 
     launcher::DownloadRequest downloadRequest(
@@ -221,6 +228,7 @@ private:
     std::unique_ptr<launcher::InstallService> m_service;
     std::unique_ptr<launcher::ProcessManager> m_processes;
     std::unique_ptr<launcher::ProjectUpdateManager> m_updates;
+    std::unique_ptr<launcher::LauncherUpdateManager> m_launcherUpdates;
     QByteArray m_releaseBody; ///< What the test server answers to a release list request.
 };
 
@@ -290,10 +298,15 @@ void UiSmokeTests::init()
     m_uninstaller->setRunningCheck([this](const QString& id) { return m_processes->isRunningNow(id); });
     m_updates = std::make_unique<launcher::ProjectUpdateManager>(
         *m_client, *m_registry, *m_releases, *m_service, *m_processes, *m_installed, *m_settings);
+    m_launcherUpdates = std::make_unique<launcher::LauncherUpdateManager>(
+        *m_client, *m_releases, *m_downloads, *m_settings, *m_paths);
+    m_launcherUpdates->setCurrentVersion(u"1.0.0"_s);
+    m_launcherUpdates->setUpdaterStarter([](const QString&, const QString&) { return true; });
 }
 
 void UiSmokeTests::cleanup()
 {
+    m_launcherUpdates.reset();
     m_updates.reset();
     m_processes.reset();
     m_service.reset();
@@ -707,7 +720,11 @@ void UiSmokeTests::downloadsPageShowsProgressAndCancels()
     QVERIFY2(status.contains(u" von "_s), qPrintable(status));
     auto* bar = find<QProgressBar>(*rows.first(), "DownloadProgress");
     QVERIFY(bar);
-    QVERIFY(bar->value() > 200 && bar->value() < 500); // about a third of the file
+    // How far the download is depends on the speed of the test server, so only the
+    // direction is checked: the bar moves, and it is not full while the download runs.
+    QTRY_VERIFY_WITH_TIMEOUT(bar->value() > 0, 5000);
+    QVERIFY(bar->value() < bar->maximum());
+    QCOMPARE(m_downloads->download(id)->state, launcher::DownloadState::Running);
     saveScreenshot(window, u"downloads-running"_s);
 
     // The button on the row cancels the download, and the row moves to the history.
@@ -749,7 +766,8 @@ void UiSmokeTests::downloadsPageShowsFinishedAndFailedDownloads()
     QVERIFY(find<QLabel>(*rows.at(1), "DownloadStatus")->text().startsWith(u"Abgeschlossen"_s));
 
     // Finished and failed entries have neither a progress bar nor a cancel button.
-    QVERIFY(window.findChildren<QProgressBar*>().isEmpty());
+    for (const QFrame* row : rows)
+        QVERIFY(row->findChildren<QProgressBar*>().isEmpty());
     QVERIFY(window.findChildren<QAbstractButton*>(u"DownloadCancel"_s).isEmpty());
     saveScreenshot(window, u"downloads-history"_s);
 }
@@ -1121,6 +1139,199 @@ void UiSmokeTests::cardShowsARunningProjectAndAnUnexpectedEnd()
     QTRY_COMPARE_WITH_TIMEOUT((m_processes->refresh(), primary->text()), u"Starten"_s, 10000);
     QVERIFY(primary->isEnabled());
     QVERIFY(uninstall->isVisible());
+}
+
+// ---- The launcher's own update ----------------------------------------------------------
+
+namespace {
+
+/// A release list with one stable launcher release.
+QByteArray launcherReleaseList(const QString& version)
+{
+    const QJsonObject asset {{u"name"_s, u"KERJAMI-"_s + version + u"-Windows-x64-Portable.zip"_s},
+        {u"size"_s, 123456}, {u"state"_s, u"uploaded"_s}, {u"digest"_s, u"sha256:"_s + u"b"_s.repeated(64)}};
+    const QJsonObject release {{u"tag_name"_s, u"v"_s + version}, {u"name"_s, u"Release"_s},
+        {u"body"_s, u"- Selbstupdate\n- Fehler behoben"_s}, {u"draft"_s, false}, {u"prerelease"_s, false},
+        {u"published_at"_s, u"2026-11-01T12:00:00Z"_s}, {u"assets"_s, QJsonArray {asset}}};
+    return QJsonDocument(QJsonArray {release}).toJson();
+}
+
+} // namespace
+
+void UiSmokeTests::launcherUpdatePanelsFollowTheManager()
+{
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    // Dashboard and settings show the same element.
+    auto* dashboard = find<QWidget>(window, "DashboardLauncherUpdate");
+    auto* settings = find<QWidget>(window, "SettingsLauncherUpdate");
+    QVERIFY(dashboard && settings);
+    auto* status = dashboard->findChild<QLabel*>(u"LauncherUpdateStatus"_s);
+    auto* check = dashboard->findChild<QPushButton*>(u"LauncherUpdateCheck"_s);
+    auto* install = dashboard->findChild<QPushButton*>(u"LauncherUpdateInstall"_s);
+    QVERIFY(status && check && install);
+    QVERIFY(status->text().contains(u"Noch nicht nach Updates gesucht"_s));
+    QVERIFY(status->text().contains(u"1.0.0"_s));
+
+    window.showPage(PageId::Dashboard);
+    QTest::qWait(200);
+    QVERIFY(check->isVisible());
+    QVERIFY(!install->isVisible());
+    QVERIFY(!dashboard->findChild<QProgressBar*>(u"LauncherUpdateProgress"_s)->isVisible());
+
+    m_releaseBody = launcherReleaseList(u"2.0.0"_s);
+    check->click();
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(u"Version 2.0.0 ist verfügbar"_s), 10000);
+    QVERIFY(install->isVisible());
+    QCOMPARE(install->text(), u"Aktualisieren"_s);
+    QCOMPARE(settings->findChild<QLabel*>(u"LauncherUpdateStatus"_s)->text(), status->text());
+    saveScreenshot(window, u"dashboard-launcher-update"_s);
+
+    // Up to date.
+    m_releaseBody = launcherReleaseList(u"1.0.0"_s);
+    check->click();
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(u"ist aktuell"_s), 10000);
+    QVERIFY(!install->isVisible());
+
+    // The look fails (no answer): what is known stays on the screen.
+    m_releaseBody = launcherReleaseList(u"2.0.0"_s);
+    m_server->close();
+    m_launcherUpdates->checkNow();
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(u"Die letzte Suche war nicht möglich"_s), 15000);
+}
+
+void UiSmokeTests::launcherUpdateAsksBeforeDownloadingAndCanBeCancelled()
+{
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Dashboard);
+
+    auto* panel = find<QWidget>(window, "DashboardLauncherUpdate");
+    auto* status = panel->findChild<QLabel*>(u"LauncherUpdateStatus"_s);
+    auto* check = panel->findChild<QPushButton*>(u"LauncherUpdateCheck"_s);
+    auto* install = panel->findChild<QPushButton*>(u"LauncherUpdateInstall"_s);
+    auto* cancel = panel->findChild<QPushButton*>(u"LauncherUpdateCancel"_s);
+    auto* progress = panel->findChild<QProgressBar*>(u"LauncherUpdateProgress"_s);
+
+    m_releaseBody = launcherReleaseList(u"2.0.0"_s);
+    check->click();
+    QTRY_VERIFY_WITH_TIMEOUT(install->isVisible(), 10000);
+
+    // "No": nothing is downloaded.
+    QString seenVersion;
+    QString seenNotes;
+    launcher::ui::Dialogs::setLauncherUpdateConfirmationForTests(
+        [&](const launcher::LauncherUpdateInfo& info) {
+            seenVersion = info.latestVersion;
+            seenNotes = info.notes;
+            return false;
+        });
+    install->click();
+    QCOMPARE(seenVersion, u"2.0.0"_s);
+    QVERIFY(seenNotes.contains(u"Selbstupdate"_s));
+    QCOMPARE(m_launcherUpdates->info().state, launcher::LauncherUpdateState::Available);
+    QVERIFY(!cancel->isVisible());
+
+    // "Yes": the update starts and can be cancelled.
+    launcher::ui::Dialogs::setLauncherUpdateConfirmationForTests(
+        [](const launcher::LauncherUpdateInfo&) { return true; });
+    install->click();
+    launcher::ui::Dialogs::setLauncherUpdateConfirmationForTests({});
+    QCOMPARE(m_launcherUpdates->info().state, launcher::LauncherUpdateState::Downloading);
+    QVERIFY(status->text().contains(u"wird geladen"_s));
+    QVERIFY(cancel->isVisible());
+    QVERIFY(progress->isVisible());
+    QVERIFY(!install->isVisible());
+
+    cancel->click();
+    QCOMPARE(m_launcherUpdates->info().state, launcher::LauncherUpdateState::Available);
+    QVERIFY(install->isVisible());
+    QVERIFY(!cancel->isVisible());
+    QVERIFY(!progress->isVisible());
+}
+
+void UiSmokeTests::launcherUpdateFailuresAreExplained()
+{
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Dashboard);
+
+    auto* panel = find<QWidget>(window, "DashboardLauncherUpdate");
+    auto* status = panel->findChild<QLabel*>(u"LauncherUpdateStatus"_s);
+    auto* check = panel->findChild<QPushButton*>(u"LauncherUpdateCheck"_s);
+    auto* install = panel->findChild<QPushButton*>(u"LauncherUpdateInstall"_s);
+    auto* problem = panel->findChild<QLabel*>(u"LauncherUpdateProblem"_s);
+
+    // The test server delivers a file that is not the size the release announced.
+    m_releaseBody = launcherReleaseList(u"2.0.0"_s);
+    check->click();
+    QTRY_VERIFY_WITH_TIMEOUT(install->isVisible(), 10000);
+    launcher::ui::Dialogs::setLauncherUpdateConfirmationForTests(
+        [](const launcher::LauncherUpdateInfo&) { return true; });
+    install->click();
+    launcher::ui::Dialogs::setLauncherUpdateConfirmationForTests({});
+
+    QTRY_VERIFY_WITH_TIMEOUT(problem->isVisible(), 15000);
+    QVERIFY2(problem->text().contains(u"Größe"_s), qPrintable(problem->text()));
+    QVERIFY(status->text().contains(u"fehlgeschlagen"_s));
+    QCOMPARE(install->text(), u"Erneut versuchen"_s); // the version is still known
+    QVERIFY(install->isVisible());
+    saveScreenshot(window, u"dashboard-launcher-update-failed"_s);
+
+    // A new look clears the failure.
+    m_server->close();
+    m_server.reset();
+}
+
+void UiSmokeTests::startupMessagesAreWorded()
+{
+    using launcher::TransactionOutcome;
+    using launcher::TransactionResult;
+    using launcher::UpdateReport;
+    using Level = launcher::ui::StartupMessage::Level;
+
+    UpdateReport report;
+    report.fromVersion = u"1.0.0"_s;
+    report.toVersion = u"2.0.0"_s;
+    report.backupDir = u"updater/backups/1.0.0-x"_s;
+
+    report.status = UpdateReport::Status::Success;
+    auto message = launcher::ui::updateReportMessage(report);
+    QVERIFY(message.has_value());
+    QCOMPARE(message->level, Level::Information);
+    QVERIFY(message->text.contains(u"2.0.0"_s));
+
+    report.status = UpdateReport::Status::RolledBack;
+    report.failedPath = u"extra.dll"_s;
+    message = launcher::ui::updateReportMessage(report);
+    QCOMPARE(message->level, Level::Warning);
+    QVERIFY(message->text.contains(u"wiederhergestellt"_s));
+    QVERIFY(message->text.contains(u"extra.dll"_s));
+
+    report.status = UpdateReport::Status::NotApplied;
+    report.detail = u"the launcher did not close in time"_s;
+    message = launcher::ui::updateReportMessage(report);
+    QCOMPARE(message->level, Level::Warning);
+    QVERIFY(message->text.contains(u"nichts verändert"_s));
+
+    report.status = UpdateReport::Status::Failed;
+    message = launcher::ui::updateReportMessage(report);
+    QCOMPARE(message->level, Level::Critical);
+    QVERIFY(message->text.contains(u"updater"_s) || message->text.contains(u"Ordner"_s));
+
+    TransactionResult result;
+    result.outcome = TransactionOutcome::Success;
+    QCOMPARE(launcher::ui::recoveryMessage(result)->level, Level::Information);
+    result.outcome = TransactionOutcome::RolledBack;
+    QCOMPARE(launcher::ui::recoveryMessage(result)->level, Level::Warning);
+    result.outcome = TransactionOutcome::RollbackFailed;
+    QCOMPARE(launcher::ui::recoveryMessage(result)->level, Level::Critical);
+    result.outcome = TransactionOutcome::NothingToDo;
+    QVERIFY(!launcher::ui::recoveryMessage(result).has_value());
 }
 
 QTEST_MAIN(UiSmokeTests)

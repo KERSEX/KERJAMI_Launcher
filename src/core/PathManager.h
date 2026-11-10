@@ -39,12 +39,18 @@ public:
     QString tempDir() const;      ///< temp/      - partial downloads and staging
     QString cacheDir() const;     ///< cache/     - registry and release cache
     QString logsDir() const;      ///< logs/
+    QString updaterDir() const;   ///< updater/ - update journal, report, backups of replaced program files
 
     QString settingsFile() const; ///< launcher/settings.json
     QString stateFile() const;    ///< launcher/launcher.json
     QString lockFile() const;     ///< launcher/launcher.lock
 
     QString registryCacheFile() const; ///< cache/registry.json - last valid registry
+
+    QString updateJournalFile() const; ///< updater/journal.json - exists only while an update replaces files
+    QString updateReportFile() const;  ///< updater/last-update.json - how the last update ended, shown once
+    QString updaterLockFile() const;   ///< updater/updater.lock - held while an update is under way
+    QString updateBackupsDir() const;  ///< updater/backups/ - program files of earlier versions
 
     /// All folders that hold user data and are created by prepare().
     QStringList dataDirectories() const;

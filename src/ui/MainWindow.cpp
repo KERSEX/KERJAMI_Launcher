@@ -46,11 +46,11 @@ MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     m_pages = new QStackedWidget(central);
 
     // Order must match PageId.
-    auto* dashboard = new DashboardPage(m_pages);
+    auto* dashboard = new DashboardPage(context, m_pages);
     m_pages->addWidget(dashboard);
     m_pages->addWidget(new LibraryPage(context, m_pages));
     m_pages->addWidget(new DownloadsPage(context.downloads, m_pages));
-    m_pages->addWidget(new SettingsPage(context.paths, settings, m_pages));
+    m_pages->addWidget(new SettingsPage(context.paths, settings, context.launcherUpdates, m_pages));
 
     layout->addWidget(createSidebar());
     layout->addWidget(m_pages, 1);

@@ -30,6 +30,9 @@ QString gitHubOwner();
 /// GitHub repository that publishes the launcher's own releases.
 QString launcherRepository();
 
+/// File name pattern of the portable ZIP of a launcher release, "*" for the version.
+QString updateAssetPattern();
+
 /// HTTPS address of the official project registry. Not user-configurable.
 QUrl registryUrl();
 

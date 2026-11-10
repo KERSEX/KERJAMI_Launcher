@@ -52,7 +52,9 @@ int LibraryLayout::cleanupTemp() const
     const QStringList names = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
     for (const QString& name : names) {
         const bool ours = name.startsWith(QLatin1StringView(kStagingPrefix))
-            || name.startsWith(QLatin1StringView(kTrashPrefix));
+            || name.startsWith(QLatin1StringView(kTrashPrefix))
+            || name.startsWith(QLatin1StringView(kLauncherStagingPrefix))
+            || name.startsWith(QLatin1StringView(kUpdaterFolderPrefix));
         if (ours && FileOps::removeTree(dir.filePath(name)))
             ++removed;
     }

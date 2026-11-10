@@ -52,12 +52,11 @@ function(launcher_executable_defaults target)
     endif()
 endfunction()
 
-# --- Core: everything without a user interface -------------------------------
-qt_add_library(launcher_core STATIC
-    src/app/Branding.cpp
-    src/app/Branding.h
-    src/core/Format.cpp
-    src/core/Format.h
+# --- Base: the parts the updater needs as well -----------------------------------
+# Qt Core only. The updater replaces the launcher's files; it has no use for the
+# network, and a small program with few imports is also less likely to be taken
+# for something it is not by a virus scanner's heuristics (docs/03-entscheidungen.md, D-40).
+qt_add_library(launcher_base STATIC
     src/core/JsonFile.cpp
     src/core/JsonFile.h
     src/core/Logger.cpp
@@ -66,6 +65,31 @@ qt_add_library(launcher_core STATIC
     src/core/PathManager.h
     src/core/SemVer.cpp
     src/core/SemVer.h
+    src/github/RegistryParser.cpp
+    src/github/RegistryParser.h
+    src/installer/FileOps.cpp
+    src/installer/FileOps.h
+    src/security/ArchiveValidator.cpp
+    src/security/ArchiveValidator.h
+    src/security/HashVerifier.cpp
+    src/security/HashVerifier.h
+    src/updater/UpdateManifest.cpp
+    src/updater/UpdateManifest.h
+    src/updater/UpdateTransaction.cpp
+    src/updater/UpdateTransaction.h
+    src/updater/UpdaterProtocol.cpp
+    src/updater/UpdaterProtocol.h
+)
+target_include_directories(launcher_base PUBLIC src)
+target_link_libraries(launcher_base PUBLIC Qt6::Core)
+launcher_target_defaults(launcher_base)
+
+# --- Core: everything without a user interface -------------------------------
+qt_add_library(launcher_core STATIC
+    src/app/Branding.cpp
+    src/app/Branding.h
+    src/core/Format.cpp
+    src/core/Format.h
     src/core/SettingsManager.cpp
     src/core/SettingsManager.h
     src/downloads/DownloadManager.cpp
@@ -76,16 +100,12 @@ qt_add_library(launcher_core STATIC
     src/github/GitHubClient.h
     src/github/RegistryManager.cpp
     src/github/RegistryManager.h
-    src/github/RegistryParser.cpp
-    src/github/RegistryParser.h
     src/github/ReleaseManager.cpp
     src/github/ReleaseManager.h
     src/github/ReleaseParser.cpp
     src/github/ReleaseParser.h
     src/installer/ArchiveExtractor.cpp
     src/installer/ArchiveExtractor.h
-    src/installer/FileOps.cpp
-    src/installer/FileOps.h
     src/installer/InstallService.cpp
     src/installer/InstallService.h
     src/installer/InstalledProjects.cpp
@@ -105,19 +125,21 @@ qt_add_library(launcher_core STATIC
     src/models/Release.h
     src/process/ProcessManager.cpp
     src/process/ProcessManager.h
-    src/security/ArchiveValidator.cpp
-    src/security/ArchiveValidator.h
-    src/security/HashVerifier.cpp
-    src/security/HashVerifier.h
     src/security/ZipArchive.cpp
     src/security/ZipArchive.h
+    src/updater/LauncherUpdateManager.cpp
+    src/updater/LauncherUpdateManager.h
     src/updater/ProjectUpdateManager.cpp
     src/updater/ProjectUpdateManager.h
+    src/updater/UpdatePackage.cpp
+    src/updater/UpdatePackage.h
+    src/updater/UpdateStartup.cpp
+    src/updater/UpdateStartup.h
 )
 target_include_directories(launcher_core
     PUBLIC src
     PRIVATE "${LAUNCHER_GENERATED_DIR}")
-target_link_libraries(launcher_core PUBLIC Qt6::Core Qt6::Network PRIVATE Qt6::ZlibPrivate)
+target_link_libraries(launcher_core PUBLIC launcher_base Qt6::Core Qt6::Network PRIVATE Qt6::ZlibPrivate)
 launcher_target_defaults(launcher_core)
 
 # --- User interface -----------------------------------------------------------
@@ -132,6 +154,8 @@ qt_add_library(launcher_ui STATIC
     src/ui/DownloadsPage.h
     src/ui/FlowLayout.cpp
     src/ui/FlowLayout.h
+    src/ui/LauncherUpdatePanel.cpp
+    src/ui/LauncherUpdatePanel.h
     src/ui/LibraryPage.cpp
     src/ui/LibraryPage.h
     src/ui/MainWindow.cpp
@@ -172,7 +196,12 @@ launcher_target_defaults(launcher_ui)
 # --- Launcher executable ------------------------------------------------------
 # Icon and version information of the EXE (shown by Explorer and the taskbar).
 set(LAUNCHER_ICON_FILE "${CMAKE_SOURCE_DIR}/resources/images/app.ico")
+set(LAUNCHER_RC_NAME "${BRAND_EXECUTABLE_NAME}")
+set(LAUNCHER_RC_DESCRIPTION "${BRAND_DISPLAY_NAME}")
 configure_file(src/app/launcher.rc.in "${LAUNCHER_GENERATED_DIR}/launcher.rc" @ONLY)
+set(LAUNCHER_RC_NAME "${BRAND_UPDATER_NAME}")
+set(LAUNCHER_RC_DESCRIPTION "${BRAND_DISPLAY_NAME} Updater")
+configure_file(src/app/launcher.rc.in "${LAUNCHER_GENERATED_DIR}/updater.rc" @ONLY)
 set_source_files_properties("${LAUNCHER_GENERATED_DIR}/launcher.rc"
     PROPERTIES OBJECT_DEPENDS "${LAUNCHER_ICON_FILE}")
 
@@ -185,6 +214,22 @@ qt_add_executable(launcher WIN32
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "${BRAND_EXECUTABLE_NAME}")
 target_link_libraries(launcher PRIVATE launcher_ui)
 launcher_executable_defaults(launcher)
+
+# --- Updater executable ---------------------------------------------------------
+# Replaces the launcher's program files after the launcher has closed (D-40). It
+# runs from a copy in temp/, so its own file can be replaced too. It needs the
+# base library only: no windows, no network.
+set_source_files_properties("${LAUNCHER_GENERATED_DIR}/updater.rc"
+    PROPERTIES OBJECT_DEPENDS "${LAUNCHER_ICON_FILE}")
+qt_add_executable(launcher_updater WIN32
+    updater/LauncherUpdater.cpp
+    updater/LauncherUpdater.h
+    updater/main.cpp
+    "${LAUNCHER_GENERATED_DIR}/updater.rc"
+)
+set_target_properties(launcher_updater PROPERTIES OUTPUT_NAME "${BRAND_UPDATER_NAME}")
+target_link_libraries(launcher_updater PRIVATE launcher_base)
+launcher_executable_defaults(launcher_updater)
 
 # --- Tests --------------------------------------------------------------------
 include(CTest)

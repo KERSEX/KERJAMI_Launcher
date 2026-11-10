@@ -18,8 +18,11 @@
 #include "process/ProcessManager.h"
 #include "ui/AppContext.h"
 #include "ui/MainWindow.h"
+#include "ui/OperationMessages.h"
 #include "ui/Theme.h"
+#include "updater/LauncherUpdateManager.h"
 #include "updater/ProjectUpdateManager.h"
+#include "updater/UpdateStartup.h"
 
 #include <QDir>
 #include <QLockFile>
@@ -106,6 +109,17 @@ int Application::run()
     Logger::install(logOptions);
     qCInfo(lcApp).noquote() << branding::displayName() << branding::version() << "starting";
 
+    // An update of the launcher may still be working on its files (the updater
+    // starts the new launcher a moment before it finishes), or an earlier one
+    // was interrupted. Both are dealt with before anything reads the files.
+    const StartupUpdateOutcome startup = UpdateStartup::run(paths);
+    if (startup.updaterStillRunning) {
+        QMessageBox::information(nullptr, branding::displayName(),
+            tr("Ein Update von %1 läuft noch. Starte %1 in einer Minute erneut.")
+                .arg(branding::productName()));
+        return ExitOk;
+    }
+
     SettingsManager settings(paths.settingsFile());
     const SettingsManager::LoadResult loadResult = settings.load();
 
@@ -161,11 +175,41 @@ int Application::run()
 
     ProjectUpdateManager updates(client, registry, releases, installService, processes, installed, settings);
 
+    // The launcher's own update. It asks for the user's confirmation and, once
+    // the new version is prepared, hands over to the updater and closes the
+    // launcher; it does not start while projects are being installed.
+    LauncherUpdateManager launcherUpdates(client, releases, downloads, settings, paths);
+    launcherUpdates.setBusyCheck([&installService] { return installService.busyCount() > 0; });
+    QObject::connect(
+        &launcherUpdates, &LauncherUpdateManager::restartRequested, &m_app, &QCoreApplication::quit);
+
     ui::AppContext context {
-        paths, settings, registry, downloads, installed, installService, processes, updates};
+        paths, settings, registry, downloads, installed, installService, processes, updates, launcherUpdates};
     ui::MainWindow window(context);
     window.show();
     updates.start();
+    launcherUpdates.start();
+
+    // How the last update ended, and what was done about an interrupted one.
+    const auto showStartupMessage = [&window](const std::optional<ui::StartupMessage>& message) {
+        if (!message)
+            return;
+        switch (message->level) {
+        case ui::StartupMessage::Level::Information:
+            QMessageBox::information(&window, message->title, message->text);
+            break;
+        case ui::StartupMessage::Level::Warning:
+            QMessageBox::warning(&window, message->title, message->text);
+            break;
+        case ui::StartupMessage::Level::Critical:
+            QMessageBox::critical(&window, message->title, message->text);
+            break;
+        }
+    };
+    if (startup.recovery)
+        showStartupMessage(ui::recoveryMessage(*startup.recovery));
+    if (startup.report)
+        showStartupMessage(ui::updateReportMessage(*startup.report));
 
     if (settings.settings().registryAutoCheck)
         registry.refresh();

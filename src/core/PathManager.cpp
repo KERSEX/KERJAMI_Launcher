@@ -75,6 +75,31 @@ QString PathManager::logsDir() const
     return m_root + u"/logs"_s;
 }
 
+QString PathManager::updaterDir() const
+{
+    return m_root + u"/updater"_s;
+}
+
+QString PathManager::updateJournalFile() const
+{
+    return updaterDir() + u"/journal.json"_s;
+}
+
+QString PathManager::updateReportFile() const
+{
+    return updaterDir() + u"/last-update.json"_s;
+}
+
+QString PathManager::updaterLockFile() const
+{
+    return updaterDir() + u"/updater.lock"_s;
+}
+
+QString PathManager::updateBackupsDir() const
+{
+    return updaterDir() + u"/backups"_s;
+}
+
 QString PathManager::settingsFile() const
 {
     return configDir() + u"/settings.json"_s;

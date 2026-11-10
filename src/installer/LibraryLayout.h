@@ -34,13 +34,16 @@ public:
     /// The file that starts an installed project.
     QString executablePath(const InstalledProject& project) const;
 
-    /// Deletes what an interrupted installation or removal left in temp/:
-    /// staging and trash folders. Only call while no installer is running.
+    /// Deletes what an interrupted installation, removal or launcher update left
+    /// in temp/: staging and trash folders, the staged launcher release and the
+    /// updater's working folder. Only call while no installer or updater is running.
     /// Returns the number of folders removed.
     int cleanupTemp() const;
 
     static constexpr auto kStagingPrefix = "staging-";
     static constexpr auto kTrashPrefix = "uninstall-";
+    static constexpr auto kLauncherStagingPrefix = "update-"; ///< the staged release of a launcher update
+    static constexpr auto kUpdaterFolderPrefix = "updater-";  ///< the updater's copy and its job file
 
 private:
     QString m_libraryDir;

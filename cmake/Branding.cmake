@@ -15,6 +15,11 @@ set(BRAND_UPDATER_NAME        "LauncherUpdater")
 set(BRAND_GITHUB_OWNER        "KERSEX")
 set(BRAND_LAUNCHER_REPOSITORY "KERJAMI_Launcher")
 
+# Name of the portable ZIP that carries a launcher release. "*" stands for the
+# version. The file is both the download for new users and the package the
+# self-update installs (docs/03-entscheidungen.md, D-39).
+set(BRAND_UPDATE_ASSET_PATTERN "${BRAND_PRODUCT_NAME}-*-Windows-x64-Portable.zip")
+
 # The only source of projects. Deliberately not configurable at runtime.
 # The repository behind this address does not exist yet (docs/03-entscheidungen.md, E-03);
 # the owner and name must be adjusted here once it has been created.

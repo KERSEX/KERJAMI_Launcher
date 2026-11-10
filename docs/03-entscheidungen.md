@@ -97,6 +97,12 @@ eine Datei und kompiliert eine Übersetzungseinheit neu.
 den Kern, und Tests prüfen Logik ohne Fenster. Die Schichtentrennung aus dem Auftrag wird damit
 vom Build-System erzwungen: `launcher_core` kann Widgets gar nicht einbinden.
 
+Seit Phase 6 gibt es darunter noch `launcher_base` (nur Qt Core): Pfade, Logger, JSON, SemVer, Hash, Archivregeln,
+Registry-Parser sowie Manifest, Transaktion und Auftrag des Updaters. `launcher_core` baut darauf auf
+und fügt Netzwerk, Manager und Dienste hinzu. `LauncherUpdater.exe` linkt nur `launcher_base`: Es gibt
+kein Netzwerk im Programm, das Dateien austauscht, und die EXE bleibt mit etwa 9 MB deutlich kleiner als
+der Launcher (etwa 30 MB).
+
 ### D-03 Kein `QSettings`, kein `QStandardPaths`
 
 Beide führen aus dem Programmordner heraus (Registry, `%LOCALAPPDATA%`). Alle Orte kommen aus
@@ -677,6 +683,113 @@ als einfacher Weg für Tests und Werkzeuge.
 - Die Wahl steht auf der Projektkarte der Bibliothek („Updates: Manuell / Automatisch“), nur bei
   installierten Projekten. Die Projekt-Detailseite folgt in Phase 7.
 
+### D-39 Launcher-Release: ZIP, Manifest und Prüfung (`UpdatePackage`, `UpdateManifest`)
+
+- **Asset:** `KERJAMI-<Version>-Windows-x64-Portable.zip`. Das Muster steht in `cmake/Branding.cmake`
+  (`BRAND_UPDATE_ASSET_PATTERN`) und kommt über `branding::updateAssetPattern()` in den Code. Gewählt
+  wird wie bei Projekten (D-23): genau eine passende Datei.
+- **Inhalt:** Die Programmdateien liegen an der Wurzel des ZIPs, dazu `update-manifest.json`. Das Manifest
+  (Schema 1) nennt `product`, `version`, `launcher`, `updater`, `files` (`path`, `size`, `sha256`) und
+  `remove` (Dateien früherer Versionen, die nicht mehr dazugehören). Nur Dateien aus `files` werden je
+  geschrieben, nur Dateien aus `remove` je gelöscht. Was sonst im ZIP liegt, wird nicht installiert.
+- **Das Manifest ist unbeglaubigte Eingabe.** Der Parser verlangt: gleiches Produkt, die Version des
+  Releases, die Programmdateien von Launcher und Updater in der Liste, 1 bis 200 Dateien, höchstens 200
+  Einträge in `remove`, jede Datei höchstens 2 GiB, Pfade nach den Windows-Regeln der Archivprüfung
+  (D-29) und keine doppelten Pfade, auch nicht, wenn sich nur die Groß-/Kleinschreibung unterscheidet.
+  **Gesperrt** sind die Ordner mit Nutzerdaten (`launcher`, `library`, `downloads`, `temp`, `cache`,
+  `logs`, `updater`) in der ganzen Tiefe und das Manifest selbst. Ein Manifest, das dort hineinzielt,
+  wird abgelehnt, und zwar für `files` genauso wie für `remove`.
+- **Prüfkette** (`UpdatePackage::prepare`, im Hintergrund-Thread, abbrechbar): SHA-256 des ZIPs → Archivregeln
+  wie bei Projekten (D-29), das Manifest gilt als Pflichtdatei → Platz (Inhalt plus 16 MiB) und
+  Pfadlänge (ein Pfad im ZIP darf zusammen mit dem längeren der Ordner von Staging und Programmordner
+  höchstens 259 Zeichen haben; mindestens 16 Zeichen müssen für Pfade bleiben) → Entpacken nach
+  `temp/update-<Version>/` → Manifest lesen → Version des Manifests gleich Version des Releases → jede Datei
+  der Liste: vorhanden, kein Link, Größe und SHA-256 stimmen. Bei einem Fehler wird das ZIP aus `downloads/`
+  und der Staging-Ordner entfernt.
+- **Ohne Prüfsumme kein Download** (wie D-28): Quelle ist der Digest von GitHub oder genau eine
+  Prüfsummendatei im Release. Fehlt beides, bleibt es bei der Meldung „keine Prüfsumme“.
+- **Reservierte ID:** Die Abfrage des Launcher-Releases läuft über die Release-Verwaltung der Projekte
+  (ein künstliches Projekt mit der ID `launcher`). Damit kein Registry-Eintrag mit dieser ID dazwischen
+  kommen kann, lehnt der Registry-Parser sie ab (`RegistryParser::isReservedProjectId`).
+- **Version:** Ein Update ist ein echt größerer SemVer-Wert als `branding::version()`. Vorabversionen
+  werden wie bei Projekten ignoriert (D-21), ein Downgrade gibt es nicht.
+- **Grund für ein Manifest statt „alles im ZIP ersetzen“:** Der Updater darf nie raten, was zum Programm
+  gehört. Die Liste mit Hashes macht den Austausch prüfbar (vorher und nachher) und schützt Nutzerdaten
+  auch dann, wenn ein Release-ZIP einmal falsch gepackt wird.
+
+### D-40 Der Updater (`LauncherUpdater.exe`) und die Transaktion
+
+- **Eigenes Programm, gestartet als Kopie.** Der Launcher kopiert die `LauncherUpdater.exe` des *neuen*
+  Releases nach `temp/updater-<Version>/`, schreibt dort `job.json` und startet die Kopie getrennt
+  (`--job job.json`). So kann der Updater auch die eigene Datei und die EXE des Launchers ersetzen, und
+  es gilt immer der Austausch-Code der neuen Version. Der Updater gehört zu `launcher_base` (nur Qt Core):
+  kein Netzwerk, keine Fenster (D-02).
+- **Reihenfolge im Updater:** Sperre `updater/updater.lock` → Log `logs/updater.log` → der Auftrag muss
+  stimmen (Ordner vorhanden, Staging im Programmordner) → **warten, bis der Launcher beendet ist**
+  (Handle auf die PID; läuft unter dieser PID ein anderes Programm als der Launcher, wird nicht gewartet,
+  weil die PID wiederverwendet wurde; höchstens 60 Sekunden, einstellbar bis 10 Minuten; danach 300 ms
+  Pause für Dateisperren und Virenscanner) → Manifest prüfen → Transaktion → Bericht → Launcher neu
+  starten → Aufräumen. Das Warten steht vor jedem Urteil, damit der Launcher nie neu startet, solange der
+  alte noch schließt.
+- **Transaktion** (`UpdateTransaction::apply`): (1) alles prüfen, bevor etwas geändert wird: jede neue Datei
+  gegen ihren Hash, jeder Zielpfad gegen die Pfadregeln, keine Links. (2) Das Journal
+  `updater/journal.json` schreiben. (3) Jede zu ersetzende Datei nach `updater/backups/<alte Version>-<Zeit>/`
+  verschieben und die neue an ihren Platz verschieben; Dateien mit gleichem Hash bleiben unangetastet,
+  Dateien aus `remove` wandern ebenfalls ins Backup. **Die Programmdatei des Updaters kommt vor der des
+  Launchers, die des Launchers zuletzt:** Solange sie die alte ist, lässt sich die alte Version noch
+  starten. (4) Alle platzierten Dateien noch einmal gegen die Hashes prüfen. (5) Das Journal löschen.
+- **Fehler:** Scheitert ein Schritt, wird der alte Zustand wiederhergestellt (`RolledBack`, Exitcode 1).
+  Gelingt das nicht vollständig (`RollbackFailed`, Exitcode 3), startet der Updater den Launcher nicht
+  und nennt den Backup-Ordner. Der Launcher beendet die Wiederherstellung beim nächsten Start selbst.
+- **Absturz mittendrin:** Das Journal bleibt liegen. `UpdateTransaction::recover` entscheidet beim nächsten
+  Start des Launchers anhand der Dateien selbst: sind alle neu, gilt das Update als abgeschlossen, sonst
+  wird zurückgerollt. Getestet wird der Abbruch nach jedem einzelnen Schritt (`simulateCrashAfter`).
+- **Bericht:** `updater/last-update.json` (Erfolg, zurückgerollt, nicht angewendet, fehlgeschlagen; Versionen,
+  Detail, Backup-Ordner, ob der Launcher gestartet wurde). Der Launcher zeigt ihn beim nächsten Start einmal
+  und löscht ihn.
+- **Exitcodes:** 0 Erfolg, 1 zurückgerollt, 2 nichts geändert, 3 fehlgeschlagen, 4 ungültiger Auftrag.
+  `--quiet` unterdrückt die Meldungsfenster (für Tests); ohne `--quiet` zeigt der Updater bei Problemen
+  ein Windows-Meldungsfenster.
+- **Beim Start des Launchers** (`UpdateStartup::run`, vor allem anderen): Läuft noch ein Updater (Sperre),
+  wartet der Launcher bis zu 60 Sekunden; ist er dann nicht fertig, meldet er es und beendet sich, statt
+  ein zweites Programm in einen halb ausgetauschten Ordner zu starten. Dann `recover`, dann der Bericht.
+  `LibraryLayout::cleanupTemp` löscht übrig gebliebene `update-*` und `updater-*` aus `temp/`.
+- **Aufräumen:** Nach Erfolg löscht der Updater den Staging-Ordner, er behält die zwei neuesten Backups in
+  `updater/backups/`. Die eigene Kopie in `temp/updater-<Version>/` löscht der Launcher beim nächsten Start.
+
+### D-41 Ablauf und Oberfläche des Launcher-Updates (`LauncherUpdateManager`)
+
+- **Prüfung:** Drei Sekunden nach dem Start und dann im eingestellten Intervall (`updates.check_interval_minutes`,
+  wie bei Projekten), aber nur, wenn „Nach Launcher-Updates suchen“ eingeschaltet ist
+  (`launcherUpdateAutoCheck`). Der Knopf „Nach Updates suchen“ geht immer. Die Prüfung ist eine einzige
+  API-Anfrage und wird übersprungen, wenn weniger als 10 Anfragen übrig sind (die Projekte brauchen den Rest, D-36).
+- **Nie ohne Zustimmung.** Der Launcher meldet das Update, mehr nicht. „Aktualisieren“ öffnet eine Rückfrage
+  mit Version und Changelog; sie sagt, dass der Launcher schließt und neu startet, dass laufende Projekte
+  geöffnet bleiben und dass Einstellungen, Projekte und Downloads unverändert bleiben. Mit „Aktualisieren“
+  stimmt der Nutzer dem ganzen Ablauf zu: laden, prüfen (D-39), neu starten. Ist das Paket bereit und läuft
+  keine Installation, übergibt der Launcher von selbst an den Updater. Eine zweite Rückfrage gäbe es
+  nur, damit der Nutzer ein Fenster mehr wegklickt. Es gibt keinen Modus „automatisch“ für den Launcher.
+- **Zustände:** Idle, Prüfung, Aktuell, Verfügbar, Lädt, Prüft („Preparing“), Bereit, Wird angewendet,
+  Fehlgeschlagen. Fehlerarten: Release nicht abrufbar, keine Prüfsumme, Prüfsummendatei, Download, Paket,
+  Installationen laufen noch („Busy“), Übergabe an den Updater. Nach einem Fehler gilt „Erneut versuchen“
+  für dieselbe Version ohne neue Rückfrage; eine neuere Version beginnt von vorn.
+- **Busy:** Laufende Installationen oder Updates von Projekten (`InstallService::busyCount() > 0`) halten den
+  Neustart auf, denn er würde sie beenden. Der Zustand „Bereit“ bleibt dann stehen, der Hinweis erklärt den
+  Grund, und „Jetzt neu starten“ geht, sobald die Installationen fertig sind. Laufende *Projekte* stören
+  nicht: Der Austausch fasst nur Dateien des Launchers an.
+- **Abbrechen** geht beim Laden, beim Prüfen und im Zustand „Bereit“; der Staging-Ordner wird entfernt. Ab der
+  Übergabe an den Updater ist es zu spät.
+- **Übergabe:** `apply()` schreibt den Auftrag und startet die Kopie des Updaters. Gelingt das nicht, bleibt
+  der Launcher offen und zeigt den Fehler (Fehlerart „Übergabe“, Staging wird entfernt). Gelingt es, meldet er
+  `restartRequested`, und die Anwendung beendet sich.
+- **Der Launcher aktualisiert sich nur unter seinem Programmnamen** (`KERJAMI.exe`). Läuft er unter einem
+  anderen Dateinamen (umbenannt, aus einem Testordner), lehnt `apply()` die Übergabe ab, weil der Updater die
+  Datei sonst nicht fände und neben dem alten Programm eine zweite Kopie entstünde.
+- **Anzeige:** Dashboard (Karte „Launcher“) und „Einstellungen → Über“ zeigen dasselbe Bedienfeld
+  (`ui/LauncherUpdatePanel`). Texte stehen in `ui/OperationMessages`, die Rückfrage in `ui/Dialogs`.
+  Beim Start zeigt die Anwendung nach dem Fenster eine Meldung über den Ausgang des letzten Updates oder über
+  eine nachgeholte Wiederherstellung (`updateReportMessage`, `recoveryMessage`).
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch und löst Links und Junctions nicht auf. Die
@@ -686,8 +799,9 @@ als einfacher Weg für Tests und Werkzeuge.
   ungetestet.
 - Ein Debug-Build linkt gegen die Release-Bibliotheken von Qt, weil es keine Debug-Variante
   gibt. In Qt-internen Code lässt sich damit nicht hineinsteppen.
-- Die Einstellungen für Registry-Prüfung, Intervall und Launcher-Updates werden gespeichert,
-  haben aber erst ab Phase 2, 5 und 6 eine Wirkung.
+- Das Intervall der Update-Prüfung gilt für Projekte und Launcher gemeinsam. Der Schalter „Nach
+  Launcher-Updates suchen“ betrifft nur die automatische Prüfung; „Nach Updates suchen“ funktioniert
+  auch ausgeschaltet.
 - Marken-Bilder werden für die Bildschirmskalierung beim Seitenaufbau gerendert. Zieht man das
   Fenster auf einen Monitor mit anderer Skalierung, bleiben sie skaliert und sind etwas weicher.
 - Windows meldet eine verweigerte Verbindung zu einem geschlossenen Port erst nach etwa zwei
@@ -733,4 +847,37 @@ als einfacher Weg für Tests und Werkzeuge.
 - Die Rückfrage vor dem Deinstallieren ist in den Tests ersetzbar
   (`Dialogs::setUninstallConfirmationForTests`), weil sich ein modales Fenster nicht aus einem Test
   bedienen lässt. Die Tests prüfen, dass gefragt wird und dass „Nein“ nichts verändert. Das echte
-  Fenster (Text, Schaltflächen, Standardauswahl „Abbrechen“) wurde noch nicht angesehen.
+  Fenster (Text, Schaltflächen, Standardauswahl „Abbrechen“) wurde noch nicht angesehen. Dasselbe
+  gilt für die Rückfrage zum Launcher-Update (`Dialogs::setLauncherUpdateConfirmationForTests`) und für
+  die Meldungsfenster des Updaters.
+- **Windows Defender meldet `LauncherUpdater.exe` fälschlich als Schadsoftware** (Stand 2026-11-10,
+  `Trojan:Win32/Bearfoos.A!ml`, eine Erkennung durch maschinelles Lernen). Auf dem Entwicklungsrechner wurde
+  die EXE kurz nach dem Bauen in die Quarantäne verschoben, im Release- und im Debug-Build und auch
+  nach dem Verschlanken des Updaters auf Qt Core allein (`launcher_base`); `KERJAMI.exe` wird nicht
+  gemeldet. Ursache ist vermutlich, dass ein kleines, nicht signiertes Programm ohne Fenster Dateien
+  tauscht und Programme startet. Folgen: Auf diesem Rechner schlagen die Tests, die die EXE brauchen
+  (`UpdaterTests`, `LauncherUpdateTests`), fehl, bis sie neu gebaut ist. Auf dem Rechner eines Nutzers kann
+  dasselbe ein Selbstupdate verhindern (der Launcher meldet dann „Übergabe“ fehlgeschlagen, das Update wird
+  nicht angewendet, nichts geht kaputt). Abhilfe ist eine Code-Signatur (Phase 8, braucht ein Zertifikat
+  und eine Entscheidung), eine Meldung als Fehlalarm an Microsoft oder eine Ausnahme, die der Nutzer selbst
+  einrichtet. Der Launcher ändert keine Sicherheitseinstellungen, und diese Arbeit hat sie ebenfalls
+  nicht geändert. Nicht umgesetzt: den Austausch als Betriebsart von `KERJAMI.exe` selbst laufen zu
+  lassen (die Kopie in `temp/` startet mit `--apply-update`). Das würde die eigene EXE vermeiden, weicht aber
+  vom Auftrag ab, der `LauncherUpdater.exe` nennt.
+- Die Austauschlogik kommt aus dem *neuen* Release (die Kopie des Updaters), die Prüfung des Pakets aus
+  dem *laufenden* Launcher. Ändert ein künftiges Release das Manifest-Schema, kann ein älterer Launcher
+  es nicht lesen und lehnt es ab; ein solcher Sprung braucht einmal eine Aktualisierung von Hand. Deshalb
+  bleibt Schema 1, bis es einen Grund gibt.
+- Ob der neue Launcher nach dem Austausch tatsächlich startet, prüft der Updater nicht. Er startet ihn und
+  merkt es nur, wenn die Datei fehlt. Ein Launcher, der gleich wieder abstürzt, wird nicht zurückgerollt; die
+  Dateien der alten Version liegen in `updater/backups/` (die zwei letzten Stände bleiben erhalten).
+- Das Release-ZIP ist das ganze portable Paket (etwa 30 MB). Beim Austausch bleiben Dateien mit gleichem
+  Hash unangetastet, geladen wird aber immer alles.
+- Dateien, die ein früheres Release mitgebracht hat und die ein neues Manifest nicht in `remove` nennt,
+  bleiben liegen. Der Updater löscht nichts, was nicht ausdrücklich genannt ist.
+- Der Updater zeigt Probleme mit einem schlichten Windows-Meldungsfenster in der Sprache des Programms
+  (Deutsch), nicht im Stil der Anwendung. Der Normalfall ist der Bericht, den der Launcher beim nächsten
+  Start anzeigt.
+- Ein Selbstupdate gegen ein echtes GitHub-Release ist noch nicht getestet (das Repository hat kein
+  Release). Der Test `selfUpdateEndToEnd` fährt die ganze Kette mit der echten `LauncherUpdater.exe` gegen
+  einen lokalen Server, der GitHub nachbildet.

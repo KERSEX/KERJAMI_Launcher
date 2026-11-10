@@ -3,6 +3,7 @@
 #include "ui/Page.h"
 
 namespace launcher {
+class LauncherUpdateManager;
 class PathManager;
 class SettingsManager;
 }
@@ -15,13 +16,14 @@ class SettingsPage : public Page {
     Q_OBJECT
 
 public:
-    SettingsPage(const PathManager& paths, SettingsManager& settings, QWidget* parent = nullptr);
+    SettingsPage(const PathManager& paths, SettingsManager& settings, LauncherUpdateManager& launcherUpdates,
+        QWidget* parent = nullptr);
 
 private:
     QWidget* createStorageCard(const PathManager& paths);
     QWidget* createUpdatesCard();
     QWidget* createStartupCard();
-    QWidget* createAboutCard(const PathManager& paths);
+    QWidget* createAboutCard(const PathManager& paths, LauncherUpdateManager& launcherUpdates);
 
     /// Title and description on the left, an optional control on the right.
     QWidget* createRow(const QString& title, const QString& description, QWidget* control);

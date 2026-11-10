@@ -987,8 +987,11 @@ private slots:
         QVERIFY(writeFile(temp(u"uninstall-b/deep/file.txt"_s), "x"));
         QVERIFY(writeFile(temp(u"download-1.part"_s), "partial"));
         QVERIFY(writeFile(temp(u"other/file.txt"_s), "x"));
+        // What a launcher update leaves: the staged release and the updater's working folder.
+        QVERIFY(writeFile(temp(u"update-2.0.0/KERJAMI.exe"_s), "x"));
+        QVERIFY(writeFile(temp(u"updater-2.0.0/job.json"_s), "{}"));
 
-        QCOMPARE(m_layout->cleanupTemp(), 2);
+        QCOMPARE(m_layout->cleanupTemp(), 4);
         QStringList rest = leftovers();
         rest.sort();
         QCOMPARE(rest, (QStringList {u"download-1.part"_s, u"other"_s}));

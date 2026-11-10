@@ -4,6 +4,7 @@
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
 #include "ui/Controls.h"
+#include "ui/LauncherUpdatePanel.h"
 
 #include <QDesktopServices>
 #include <QDir>
@@ -30,7 +31,8 @@ QPushButton* createButton(const QString& text, QWidget* parent)
 
 } // namespace
 
-SettingsPage::SettingsPage(const PathManager& paths, SettingsManager& settings, QWidget* parent)
+SettingsPage::SettingsPage(const PathManager& paths, SettingsManager& settings,
+    LauncherUpdateManager& launcherUpdates, QWidget* parent)
     : Page(tr("Einstellungen"), tr("Änderungen werden sofort gespeichert."), parent)
     , m_settings(settings)
 {
@@ -47,7 +49,7 @@ SettingsPage::SettingsPage(const PathManager& paths, SettingsManager& settings, 
 
     contentLayout()->addSpacing(8);
     contentLayout()->addWidget(createLabel(tr("Über"), "section", this));
-    contentLayout()->addWidget(createAboutCard(paths));
+    contentLayout()->addWidget(createAboutCard(paths, launcherUpdates));
 
     contentLayout()->addStretch(1);
 }
@@ -152,13 +154,17 @@ QWidget* SettingsPage::createStartupCard()
     return card;
 }
 
-QWidget* SettingsPage::createAboutCard(const PathManager& paths)
+QWidget* SettingsPage::createAboutCard(const PathManager& paths, LauncherUpdateManager& launcherUpdates)
 {
     auto* card = new Card(this);
 
     QLabel* version = createLabel(branding::version(), "secondary", card);
     version->setObjectName("SettingsVersion");
     card->body()->addWidget(createRow(branding::displayName(), tr("Installierte Version"), version));
+
+    auto* updates = new LauncherUpdatePanel(launcherUpdates, card);
+    updates->setObjectName("SettingsLauncherUpdate");
+    card->body()->addWidget(updates);
 
     card->body()->addWidget(createDivider(card));
 

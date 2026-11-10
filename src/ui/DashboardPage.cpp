@@ -2,6 +2,7 @@
 
 #include "app/Branding.h"
 #include "ui/Controls.h"
+#include "ui/LauncherUpdatePanel.h"
 #include "ui/Theme.h"
 
 #include <QHBoxLayout>
@@ -12,7 +13,7 @@ using namespace Qt::StringLiterals;
 
 namespace launcher::ui {
 
-DashboardPage::DashboardPage(QWidget* parent)
+DashboardPage::DashboardPage(const AppContext& context, QWidget* parent)
     : Page(tr("Dashboard"), tr("Dein Überblick über Projekte und Updates."), parent)
 {
     auto* welcome = new Card(this);
@@ -63,6 +64,9 @@ DashboardPage::DashboardPage(QWidget* parent)
     version->setObjectName("LauncherVersion");
     versionRow->addWidget(version);
     launcherCard->body()->addLayout(versionRow);
+    auto* updates = new LauncherUpdatePanel(context.launcherUpdates, launcherCard);
+    updates->setObjectName("DashboardLauncherUpdate");
+    launcherCard->body()->addWidget(updates);
     contentLayout()->addWidget(launcherCard);
 
     contentLayout()->addStretch(1);

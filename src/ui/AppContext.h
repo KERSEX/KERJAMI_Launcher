@@ -4,6 +4,7 @@ namespace launcher {
 class DownloadManager;
 class InstallService;
 class InstalledProjects;
+class LauncherUpdateManager;
 class PathManager;
 class ProcessManager;
 class ProjectUpdateManager;
@@ -24,6 +25,7 @@ struct AppContext {
     InstallService& installService;
     ProcessManager& processes;
     ProjectUpdateManager& updates;
+    LauncherUpdateManager& launcherUpdates;
 };
 
 } // namespace launcher::ui

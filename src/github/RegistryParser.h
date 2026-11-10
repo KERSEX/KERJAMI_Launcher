@@ -64,6 +64,14 @@ RegistryParseResult parse(const QJsonObject& root);
 /// Lowercase letters, digits and single hyphens, at most 48 characters.
 bool isValidProjectId(const QString& id);
 
+/// Ids the registry may not give to a project because the launcher uses them
+/// for itself: its own updates are fetched and stored like a project named
+/// "launcher". Such an id passes isValidProjectId but never comes out of the parser.
+bool isReservedProjectId(const QString& id);
+
+/// The id under which the launcher's own releases and downloads are handled.
+inline const QString kLauncherProjectId = QStringLiteral("launcher");
+
 /// A GitHub account name.
 bool isValidOwner(const QString& owner);
 

@@ -214,8 +214,12 @@ std::optional<Project> parseEntry(const QJsonValue& value, QString* error)
     EntryReader reader(object);
 
     Project project;
-    project.id = reader.identifier("id"_L1, RegistryParser::isValidProjectId,
-        u"lowercase letters, digits and single hyphens, at most 48 characters"_s);
+    project.id = reader.identifier(
+        "id"_L1,
+        [](const QString& id) {
+            return RegistryParser::isValidProjectId(id) && !RegistryParser::isReservedProjectId(id);
+        },
+        u"lowercase letters, digits and single hyphens, at most 48 characters, not \"launcher\""_s);
     project.name = reader.text("name"_L1, 1, kMaxNameLength);
     project.description = reader.text("description"_L1, 1, kMaxDescriptionLength);
     project.owner = reader.identifier("owner"_L1, RegistryParser::isValidOwner, u"a GitHub account name"_s);
@@ -261,6 +265,11 @@ bool isReservedWindowsName(const QString& name)
 bool isValidProjectId(const QString& id)
 {
     return id.size() <= kMaxIdLength && matchesWhole(u"[a-z0-9]+(?:-[a-z0-9]+)*"_s, id);
+}
+
+bool isReservedProjectId(const QString& id)
+{
+    return id == kLauncherProjectId;
 }
 
 bool isValidOwner(const QString& owner)
