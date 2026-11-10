@@ -1,0 +1,242 @@
+/*
+ * Application style sheet.
+ *
+ * Names starting with an at sign are tokens. Theme.cpp replaces them with the
+ * colours of the active palette, so this file contains no colour values of
+ * its own. Do not use the at sign for anything else in this file.
+ * Sizes are device-independent pixels; Qt scales them for the monitor's DPI.
+ */
+
+QToolTip {
+    background-color: @card;
+    color: @textPrimary;
+    border: 1px solid @borderStrong;
+    padding: 4px 8px;
+}
+
+/* ---- Sidebar -------------------------------------------------------------- */
+
+#Sidebar {
+    background-color: @surface;
+    border: none;
+    border-right: 1px solid @border;
+}
+
+#BrandName {
+    color: @textPrimary;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+#SidebarVersion {
+    color: @textSecondary;
+    font-size: 12px;
+}
+
+/* ---- Text roles ------------------------------------------------------------ */
+
+#PageTitle {
+    color: @textPrimary;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+#PageSubtitle {
+    color: @textSecondary;
+    font-size: 14px;
+}
+
+QLabel[role="hero"] {
+    color: @textPrimary;
+    font-size: 21px;
+    font-weight: 600;
+}
+
+QLabel[role="section"] {
+    color: @textSecondary;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel[role="title"] {
+    color: @textPrimary;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel[role="body"] {
+    color: @textPrimary;
+    font-size: 13px;
+}
+
+QLabel[role="secondary"] {
+    color: @textSecondary;
+    font-size: 13px;
+}
+
+QLabel[role="glyph"] {
+    color: @textSecondary;
+}
+
+/* ---- Containers ------------------------------------------------------------ */
+
+QFrame[card="true"] {
+    background-color: @card;
+    border: 1px solid @border;
+    border-radius: 12px;
+}
+
+QFrame[divider="true"] {
+    background-color: @border;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* ---- Buttons --------------------------------------------------------------- */
+
+QPushButton {
+    background-color: @cardHover;
+    color: @textPrimary;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 7px 16px;
+    font-size: 13px;
+}
+
+QPushButton:hover {
+    border-color: @borderStrong;
+}
+
+QPushButton:pressed {
+    background-color: @surface;
+}
+
+QPushButton:focus {
+    border-color: @accent;
+}
+
+QPushButton:disabled {
+    color: @textSecondary;
+}
+
+QPushButton[accent="true"] {
+    background-color: @accent;
+    color: @textOnAccent;
+    border: 1px solid @accent;
+    font-weight: 600;
+}
+
+QPushButton[accent="true"]:hover {
+    background-color: @accentHover;
+    border-color: @accentHover;
+}
+
+QPushButton[accent="true"]:pressed {
+    background-color: @accentPressed;
+    border-color: @accentPressed;
+}
+
+/* ---- Combo boxes -----------------------------------------------------------
+ * The arrow is painted by ui::ComboBox; an empty drop-down keeps Qt from
+ * drawing its native button there.
+ */
+
+QComboBox {
+    background-color: @surface;
+    color: @textPrimary;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 6px 34px 6px 12px;
+    font-size: 13px;
+    min-width: 150px;
+}
+
+QComboBox:hover {
+    border-color: @borderStrong;
+}
+
+QComboBox:focus,
+QComboBox:on {
+    border-color: @accent;
+}
+
+QComboBox::drop-down {
+    background: transparent;
+    border: none;
+    width: 30px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: @card;
+    color: @textPrimary;
+    border: 1px solid @borderStrong;
+    padding: 4px;
+    outline: 0;
+    selection-background-color: @accentSoft;
+    selection-color: @textPrimary;
+}
+
+QComboBox QAbstractItemView::item {
+    min-height: 30px;
+    padding: 0px 8px;
+    border-radius: 6px;
+}
+
+/* ---- Scroll bars ----------------------------------------------------------- */
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 2px;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 12px;
+    margin: 2px;
+}
+
+QScrollBar::handle {
+    background-color: @border;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 32px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 32px;
+}
+
+QScrollBar::handle:hover {
+    background-color: @borderStrong;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+}
+
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+}
+
+/* ---- Dialogs --------------------------------------------------------------- */
+
+QMessageBox {
+    background-color: @surface;
+}
+
+QMessageBox QLabel {
+    color: @textPrimary;
+    font-size: 13px;
+}

@@ -1,0 +1,19 @@
+BasedOnStyle: WebKit
+ColumnLimit: 110
+IndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+PointerAlignment: Left
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterControlStatement: Never
+AllowShortFunctionsOnASingleLine: InlineOnly
+BreakConstructorInitializers: BeforeComma
+BreakBeforeBinaryOperators: NonAssignment
+Cpp11BracedListStyle: true
+AlignTrailingComments: true
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve

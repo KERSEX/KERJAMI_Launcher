@@ -1,0 +1,13 @@
+# Build output
+/build/
+
+# Machine-specific build configuration
+/scripts/build.local.psd1
+CMakeUserPresets.json
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
