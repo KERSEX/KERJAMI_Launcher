@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/images/logo-source.png" alt="KERJAMI Launcher" width="280">
+  <img src="resources/images/Kerjami-Launcher-Logo.png" alt="KERJAMI Launcher" width="280">
 </p>
 
 # KERJAMI Launcher
