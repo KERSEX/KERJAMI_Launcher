@@ -2,7 +2,7 @@
   <img src="resources/images/logo-source.png" alt="KERJAMI Launcher" width="280">
 </p>
 
-# KERJAMI Launcher
+# KERJAMI Launcher?
 
 Portabler Launcher für freigegebene Community-Projekte: entdecken, installieren, starten,
 aktualisieren. Native Windows-Anwendung in C++20 mit Qt 6 Widgets, ohne Installation und ohne
