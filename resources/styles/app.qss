@@ -240,3 +240,46 @@ QMessageBox QLabel {
     color: @textPrimary;
     font-size: 13px;
 }
+
+/* ---- Text input ------------------------------------------------------------ */
+
+QLineEdit {
+    background-color: @surface;
+    color: @textPrimary;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 13px;
+    selection-background-color: @accent;
+    selection-color: @textOnAccent;
+}
+
+QLineEdit:hover {
+    border-color: @borderStrong;
+}
+
+QLineEdit:focus {
+    border-color: @accent;
+}
+
+/* ---- Tags and badges ------------------------------------------------------- */
+
+QLabel[role="chip"] {
+    background-color: @surface;
+    color: @textSecondary;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 1px 9px;
+    font-size: 11px;
+}
+
+/* A radius above half the label's height is dropped by Qt, not clamped. */
+QLabel[role="badge"] {
+    background-color: @accentSoft;
+    color: @accent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 1px 9px;
+    font-size: 11px;
+    font-weight: 600;
+}

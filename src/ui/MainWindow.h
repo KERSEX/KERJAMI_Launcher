@@ -7,6 +7,7 @@ class QStackedWidget;
 
 namespace launcher {
 class PathManager;
+class RegistryManager;
 class SettingsManager;
 }
 
@@ -25,7 +26,8 @@ public:
         Settings,
     };
 
-    MainWindow(const PathManager& paths, SettingsManager& settings, QWidget* parent = nullptr);
+    MainWindow(const PathManager& paths, SettingsManager& settings, RegistryManager& registry,
+        QWidget* parent = nullptr);
 
     PageId currentPage() const;
     void showPage(PageId page);

@@ -56,8 +56,9 @@ Ungültige Einträge werden abgelehnt, ohne die übrigen Projekte zu beeinträch
 ein Eintrag unter anderem bei:
 
 - fehlenden Pflichtfeldern oder Werten des falschen Typs,
-- einer `id` oder einem `install_directory`, das ein anderer Eintrag schon verwendet (Groß- und
-  Kleinschreibung zählt nicht),
+- einer `id` oder einem `install_directory`, das ein anderer Eintrag ebenfalls verwendet (Groß- und
+  Kleinschreibung zählt nicht, ein deaktivierter Eintrag zählt mit). Es werden **alle** beteiligten
+  Einträge abgelehnt, denn welcher der richtige ist, lässt sich nicht sagen,
 - einem `install_directory`, das einen Pfad enthält, mit einem Punkt endet oder ein reservierter
   Windows-Name ist (`CON`, `NUL`, `COM1` und so weiter),
 - einem unbekannten `release_channel`,

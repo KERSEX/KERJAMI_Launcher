@@ -10,6 +10,8 @@ namespace launcher {
 // variable QT_LOGGING_RULES="launcher.*.debug=true".
 Q_DECLARE_LOGGING_CATEGORY(lcApp)
 Q_DECLARE_LOGGING_CATEGORY(lcSettings)
+Q_DECLARE_LOGGING_CATEGORY(lcNetwork)
+Q_DECLARE_LOGGING_CATEGORY(lcRegistry)
 
 /// Writes all Qt log messages of the process to a size-limited, rotating file.
 ///

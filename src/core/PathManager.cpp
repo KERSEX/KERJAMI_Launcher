@@ -85,6 +85,11 @@ QString PathManager::stateFile() const
     return configDir() + u"/launcher.json"_s;
 }
 
+QString PathManager::registryCacheFile() const
+{
+    return cacheDir() + u"/registry.json"_s;
+}
+
 QString PathManager::lockFile() const
 {
     return configDir() + u"/launcher.lock"_s;

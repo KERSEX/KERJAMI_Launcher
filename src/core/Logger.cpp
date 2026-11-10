@@ -14,6 +14,8 @@ namespace launcher {
 
 Q_LOGGING_CATEGORY(lcApp, "launcher.app", QtInfoMsg)
 Q_LOGGING_CATEGORY(lcSettings, "launcher.settings", QtInfoMsg)
+Q_LOGGING_CATEGORY(lcNetwork, "launcher.network", QtInfoMsg)
+Q_LOGGING_CATEGORY(lcRegistry, "launcher.registry", QtInfoMsg)
 
 namespace {
 

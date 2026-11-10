@@ -15,7 +15,7 @@ endif()
 
 include(cmake/Branding.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets)
 qt_standard_project_setup()
 
 # Everything runnable lands in one folder, which doubles as the portable root
@@ -62,12 +62,19 @@ qt_add_library(launcher_core STATIC
     src/core/PathManager.h
     src/core/SettingsManager.cpp
     src/core/SettingsManager.h
+    src/github/GitHubClient.cpp
+    src/github/GitHubClient.h
+    src/github/RegistryManager.cpp
+    src/github/RegistryManager.h
+    src/github/RegistryParser.cpp
+    src/github/RegistryParser.h
     src/models/LauncherSettings.h
+    src/models/Project.h
 )
 target_include_directories(launcher_core
     PUBLIC src
     PRIVATE "${LAUNCHER_GENERATED_DIR}")
-target_link_libraries(launcher_core PUBLIC Qt6::Core)
+target_link_libraries(launcher_core PUBLIC Qt6::Core Qt6::Network)
 launcher_target_defaults(launcher_core)
 
 # --- User interface -----------------------------------------------------------
@@ -78,12 +85,16 @@ qt_add_library(launcher_ui STATIC
     src/ui/DashboardPage.h
     src/ui/DownloadsPage.cpp
     src/ui/DownloadsPage.h
+    src/ui/FlowLayout.cpp
+    src/ui/FlowLayout.h
     src/ui/LibraryPage.cpp
     src/ui/LibraryPage.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
     src/ui/Page.cpp
     src/ui/Page.h
+    src/ui/ProjectCard.cpp
+    src/ui/ProjectCard.h
     src/ui/SettingsPage.cpp
     src/ui/SettingsPage.h
     src/ui/Theme.cpp

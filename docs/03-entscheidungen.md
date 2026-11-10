@@ -227,6 +227,93 @@ Asset-Typ.
   `logo-source.png` ersetzt und das Skript neu ausgeführt. Der Name im Quelltext ändert sich
   davon unabhängig über `Branding.cmake`.
 
+### D-16 Die Registry ist unbeglaubigte Eingabe
+
+Alles in `projects.json` wird wie Benutzereingabe behandelt. `RegistryParser` ist eine reine
+Funktion ohne Netzwerk und Dateizugriff, damit sich jede Regel direkt testen lässt.
+
+- Ein Dokument mit kaputter Struktur wird als Ganzes abgelehnt: kein JSON, kein Objekt,
+  `schema_version` fehlt oder ist kein positiver Ganzzahlwert, `projects` ist keine Liste, mehr als
+  500 Einträge. Eine neuere `schema_version` gilt als „Launcher zu alt“ und wird ebenfalls abgelehnt.
+- In einem gültigen Dokument steht jeder Eintrag für sich: ein ungültiger wird verworfen und
+  protokolliert, die übrigen bleiben.
+- **Doppelte `id` oder doppeltes `install_directory`** (Groß- und Kleinschreibung zählt nicht, auch
+  gegen deaktivierte Einträge) verwerfen **alle** beteiligten Einträge. Welcher der echte ist, lässt
+  sich nicht sagen, und zwei Projekte im selben Ordner würden sich gegenseitig überschreiben.
+- Bezeichner und Dateinamen werden nie getrimmt oder korrigiert, sondern streng geprüft
+  (`\A…\z`, nicht `^…$`, das einen Zeilenumbruch am Ende durchlassen würde).
+- Anzeigetexte werden getrimmt; Steuer- und unsichtbare Formatzeichen (etwa die Umkehrung der
+  Schreibrichtung) sind verboten.
+- `install_directory` ist ein einzelner Ordnername ohne Pfad, ohne führenden oder abschließenden
+  Punkt und kein reservierter Windows-Name (`CON`, `NUL`, `COM1`, auch mit Endung wie `con.txt`).
+- `executable` ist ein relativer Pfad mit `/`, der auf `.exe` endet. Absolute Pfade, Laufwerke,
+  `:`, `\`, `..`, leere Segmente und reservierte Namen sind verboten.
+- Unbekannte Felder werden ignoriert, damit die Registry wachsen kann.
+- Die Prüfregeln stehen auch einzeln zur Verfügung (`isValidInstallDirectory` und andere). Der
+  Installer prüft ein Projekt in Phase 4 damit noch einmal, bevor er das Dateisystem anfasst.
+
+Die Feldreferenz für die Pflegenden steht in `docs/registry/README.md`.
+
+### D-17 Netzwerkzugriff nur über den GitHubClient
+
+- **Policy statt Vertrauen:** Jede Anfrage und jeder Redirect wird gegen eine feste Liste geprüft:
+  nur HTTPS, nur fünf GitHub-Hosts, nur der Standardport, keine Zugangsdaten in der Adresse. Der
+  Host muss exakt übereinstimmen (kein Präfix und kein Suffix).
+- Redirects folgt der Client selbst (`ManualRedirectPolicy`), damit jede Station geprüft werden
+  kann. Höchstens fünf. Der `Location`-Header wird als Rohtext gelesen, weil Qt für relative
+  Adressen nichts liefert.
+- **Wiederholungen:** höchstens drei Versuche, Pause 0,5 s und 1 s. Wiederholt wird bei
+  Verbindungsproblemen, Timeouts, 408 und 5xx, nicht bei anderen 4xx und nicht bei TLS-Fehlern.
+- **Rate Limit:** 429 sowie 403 mit `X-RateLimit-Remaining: 0` oder `Retry-After` gelten als
+  „Limit erreicht“ und werden nicht wiederholt, denn jede Wiederholung verbraucht Budget. Das
+  Budget aus den Headern ist über `GitHubClient::rateLimit()` abrufbar.
+- **Grenzen:** Timeout bei 15 s ohne Daten, Antworten der Registry höchstens 1 MiB, sonst 4 MiB.
+  Zu große Antworten werden schon während des Empfangs abgebrochen.
+- Jede Anfrage trägt `User-Agent: <Produkt>/<Version>` (GitHub verlangt einen), keine Cookies,
+  keine Anmeldung. Der Header `X-GitHub-Api-Version` geht nur an `api.github.com`.
+- Das Ergebnis kommt immer asynchron, nie aus dem Aufruf von `get()` heraus, damit der Aufrufer
+  vorher verbinden kann. Protokolliert werden Host und Pfad, nie die Parameter.
+- Die Policy ist nur im Code austauschbar (Konstruktorparameter). Tests setzen damit einen Server
+  auf dem eigenen Rechner ein. Keine Einstellung und keine Datei kann sie ändern.
+
+### D-18 Cache und Offline-Verhalten der Registry
+
+- Jede gültige Antwort wird als `cache/registry.json` gespeichert (atomar). Das Format:
+  `cache_schema`, `fetched_at`, `registry_url` und das Registry-Dokument selbst.
+- Beim Start liest `loadCache()` den Cache, noch bevor das Netzwerk antwortet. Ohne Verbindung
+  zeigt die Bibliothek also die letzte gültige Liste.
+- Der Cache wird beim Laden **erneut mit den Regeln dieser Version geprüft**. Er gilt als Daten von
+  der Festplatte, nicht als vertrauenswürdiges Ergebnis.
+- Ein Cache von einer anderen Adresse (zum Beispiel nach einer Umbenennung), mit unbekanntem
+  Layout oder ohne gültigen Zeitstempel wird ignoriert. Ein nicht lesbarer Cache wird als
+  `registry.corrupt-<Zeit>.json` beiseitegelegt.
+- Eine fehlgeschlagene Aktualisierung (keine Verbindung, HTTP-Fehler, Rate Limit, unbrauchbarer
+  Inhalt, zu neue Version) lässt die vorhandene Liste unverändert und überschreibt den Cache
+  nicht. Die Ursache steht in `problem()`.
+- Eine **gültige, aber leere** Registry ersetzt die Liste. Die Pflegenden können alle Projekte
+  zurückgezogen haben, und eine alte Liste würde das verbergen.
+- Kann der Cache nicht geschrieben werden, läuft alles weiter und es wird nur protokolliert.
+
+### D-19 Zeitplan der Registry-Abfrage
+
+Beim Start (wenn „Registry automatisch prüfen“ an ist) und danach im „Prüfintervall“ der
+Einstellungen, also im selben Takt wie später die Projekt-Updates. Der Knopf „Aktualisieren“ in der
+Bibliothek funktioniert immer. Eine Änderung der Einstellung setzt den Timer neu, löst aber keine
+Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
+
+### D-20 Bibliothek
+
+- Suche (Name, Beschreibung, Kategorie, Tags, ohne Beachtung der Groß- und Kleinschreibung),
+  Kategorie, Tag und „Nur Empfohlene“ wirken zusammen. Empfohlene Projekte stehen zuerst, danach
+  alphabetisch.
+- Die Filterlisten enthalten, was die Registry hergibt, ohne Doppelte und sortiert.
+- Tags erscheinen als Chips in einem Fluss-Layout, das bei wenig Platz umbricht.
+- Zustände: Laden, Liste, Liste mit Hinweis („Keine Verbindung … Angezeigt wird die gespeicherte
+  Liste vom …“), Fehlerkarte mit „Erneut versuchen“, leere Registry, keine Treffer mit „Filter
+  zurücksetzen“.
+- Installationsstatus, Versionen und Aktionen auf den Karten kommen mit den Phasen 3 bis 5, die
+  Detailseite mit Phase 7.
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch. Symbolische Links und Junctions werden
@@ -240,3 +327,16 @@ Asset-Typ.
   haben aber erst ab Phase 2, 5 und 6 eine Wirkung.
 - Marken-Bilder werden für die Bildschirmskalierung beim Seitenaufbau gerendert. Zieht man das
   Fenster auf einen Monitor mit anderer Skalierung, bleiben sie skaliert und sind etwas weicher.
+- Windows meldet eine verweigerte Verbindung zu einem geschlossenen Port erst nach etwa zwei
+  Sekunden. Ohne Internet ist das kein Thema, weil schon die Namensauflösung scheitert. Die Tests
+  verwenden deshalb kurze Timeouts.
+- Qt sendet eine Anfrage einmal selbst erneut, wenn der Server die Verbindung ohne Antwort schließt.
+  Ein Server kann dadurch mehr Anfragen sehen, als der Client Versuche zählt.
+- Qt verwirft einen `border-radius`, der größer als die halbe Höhe des Elements ist, statt ihn zu
+  kappen. Das Style Sheet hält die Radien der Chips deshalb bei 8 px.
+- Das Budget von 60 Anfragen pro Stunde ohne Anmeldung gilt für `api.github.com`, also für die
+  Release-Abfragen ab Phase 3. Der Abruf der Registry über `raw.githubusercontent.com` gehört nach
+  bisherigem Wissen nicht dazu, ist aber nicht belegt. Der Live-Test zeigt das Budget im Log an
+  (`LAUNCHER_LIVE_TESTS=1`); damit lässt sich prüfen, ob die Registry es verbraucht.
+- Die Bibliothek baut bei jeder Änderung alle Karten neu. Bei der Obergrenze von 500 Projekten ist
+  das unkritisch.

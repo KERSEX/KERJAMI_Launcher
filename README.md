@@ -14,8 +14,9 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Phase 1 von 8 ist umgesetzt: Build-System, Hauptfenster mit Navigation und dunklem Theme,
-portable Pfadverwaltung, Einstellungen und Logging. Registry, Downloads, Installation und
+Die Phasen 1 und 2 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Pfadverwaltung, Einstellungen und Logging, dazu der GitHub-Client und die Projekt-Registry mit
+Zwischenspeicher, Offline-Verhalten und Bibliotheksseite. Releases, Downloads, Installation und
 Updates folgen. Details stehen in [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 ## Bauen
@@ -48,7 +49,10 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `PortableTests` | Pfade, Verschieben des Ordners, fehlende Schreibrechte |
 | `SettingsTests` | Sofortiges Speichern, beschädigte Dateien, Migration |
 | `LoggerTests` | Format, Rotation, Größenlimit, Pfad-Schwärzung |
-| `UiSmokeTests` | Navigation und Einstellungen über die Oberfläche |
+| `RegistryTests` | Registry-Parser: alle Prüfregeln für Einträge, Pfade und Namen |
+| `GitHubClientTests` | URL-Policy, Wiederholungen, Rate Limit, Größenlimit, Redirects |
+| `RegistryManagerTests` | Laden, Cache, Offline-Verhalten, beschädigter Cache |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Filtern und Fehlerzuständen |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
 `build\release\screenshots` ab.

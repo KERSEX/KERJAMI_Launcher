@@ -96,34 +96,55 @@ class Logger {                          // Qt-Message-Handler mit Rotation
 };
 ```
 
-### Phase 2 – Registry
+### Phase 2 – Registry (umgesetzt)
 
 ```cpp
-struct Project {                        // models/Project.h
+struct Project {                        // models/Project.h, nur validierte Werte
     QString id, name, description, owner, repository, category;
     QStringList tags;
     bool enabled, featured;
-    ReleaseChannel channel;             // nur Stable in V1
+    ReleaseChannel releaseChannel;      // nur Stable in V1
     QString assetPattern, executable, installDirectory;
 };
 
+namespace RegistryParser {              // github/RegistryParser.h, reine Funktionen
+RegistryParseResult parse(const QByteArray& json);
+RegistryParseResult parse(const QJsonObject& root);    // auch für den Cache
+bool isValidProjectId / isValidOwner / isValidRepository /
+     isValidInstallDirectory / isValidAssetPattern / isValidExecutablePath(const QString&);
+}
+
 class GitHubClient : public QObject {   // einziger Ort mit QNetworkAccessManager
-    QNetworkReply* get(const QUrl& url, RequestKind kind);   // nur https, feste Host-Liste
-    RateLimit rateLimit() const;        // aus X-RateLimit-Headern
+    struct Policy { QStringList schemes, hosts; bool anyPort;
+                    static Policy production(); bool allows(const QUrl&) const; };
+    GitHubRequest* get(const QUrl& url, const FetchOptions& options = {});
+    RateLimit rateLimit() const;        // aus den X-RateLimit-Headern
+signals: void rateLimitChanged(const RateLimit&);
+};
+class GitHubRequest : public QObject {  // eine laufende Anfrage, löscht sich selbst
+    void abort();
+signals: void finished(const NetworkResult& result);   // genau einmal, nie vor get()
 };
 
 class RegistryManager : public QObject {
-    void refresh();                     // lädt, validiert, schreibt Cache
-    QList<Project> projects() const;    // nur enabled
-    RegistrySource source() const;      // Network | Cache | None
-signals:
-    void registryChanged();  void refreshFailed(RegistryError error);
+    void loadCache();                   // beim Start, ohne Netzwerk
+    void refresh();                     // lädt, validiert, schreibt den Cache
+    void setAutoRefresh(bool enabled, int intervalMinutes);
+    const QList<Project>& projects() const;            // nur enabled
+    Source source() const;              // None | Network | Cache
+    Problem problem() const;            // None | Unreachable | RateLimited | Http |
+                                        // InvalidContent | UnsupportedVersion
+signals: void changed();  void refreshFinished(bool success);
 };
 ```
 
-Validierung als reine Funktion `RegistryParser::parse(QByteArray) -> ParseResult`, damit sie
-ohne Netzwerk testbar ist. Erlaubte Hosts: `raw.githubusercontent.com`, `api.github.com`,
-`github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`.
+Die Oberfläche (`LibraryPage`) kennt nur den `RegistryManager`. Sie zeigt die Liste mit Suche,
+Kategorie- und Tag-Filter und „Nur Empfohlene“, dazu Lade-, Offline- und Fehlerzustände.
+
+Erlaubte Hosts (`Policy::production()`): `raw.githubusercontent.com`, `api.github.com`,
+`github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, jeweils
+nur über HTTPS auf dem Standardport. Die Entscheidungen dazu stehen in
+[03-entscheidungen.md](03-entscheidungen.md), D-16 bis D-21.
 
 ### Phase 3 – Releases und Downloads
 
@@ -213,8 +234,11 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration | 1 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen über die UI | 1 |
-| `RegistryTests.cpp`, `VersionTests.cpp`, `DownloadTests.cpp` | | 2–3 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Filtern und Fehlerzuständen | 1–2 |
+| `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln | 2 |
+| `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch | 2 |
+| `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
+| `VersionTests.cpp`, `DownloadTests.cpp` | | 3 |
 | `SecurityTests.cpp`, `InstallerTests.cpp` | | 4 |
 | `UpdateTests.cpp`, Selbstupdate-Tests | | 5–6 |
 
@@ -223,7 +247,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | Phase | Inhalt | Status |
 |---|---|---|
 | 1 | Grundgerüst | umgesetzt |
-| 2 | Registry | offen; Entwicklung ohne Repository möglich, der echte Abruf braucht das Registry-Repository (E-03) |
+| 2 | Registry | umgesetzt und gegen GitHub geprüft; die echte Registry fehlt noch (E-03), bis dahin zeigt die Bibliothek „nicht gefunden (HTTP 404)“ |
 | 3 | Releases und Downloads | offen |
 | 4 | Installation | offen; der echte Test braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | offen |

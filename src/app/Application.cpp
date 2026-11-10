@@ -4,6 +4,8 @@
 #include "core/Logger.h"
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
+#include "github/GitHubClient.h"
+#include "github/RegistryManager.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 
@@ -95,8 +97,24 @@ int Application::run()
     SettingsManager settings(paths.settingsFile());
     const SettingsManager::LoadResult loadResult = settings.load();
 
-    ui::MainWindow window(paths, settings);
+    // The client is created before the registry and destroyed after it, so a
+    // request that is still running at shutdown is cancelled while its client exists.
+    GitHubClient client(GitHubClient::Policy::production());
+    RegistryManager registry(client, paths.registryCacheFile(), branding::registryUrl());
+    registry.loadCache();
+
+    const auto applyRegistrySettings = [&settings, &registry] {
+        const LauncherSettings& current = settings.settings();
+        registry.setAutoRefresh(current.registryAutoCheck, current.updateCheckIntervalMinutes);
+    };
+    applyRegistrySettings();
+    QObject::connect(&settings, &SettingsManager::settingsChanged, &registry, applyRegistrySettings);
+
+    ui::MainWindow window(paths, settings, registry);
     window.show();
+
+    if (settings.settings().registryAutoCheck)
+        registry.refresh();
 
     if (loadResult == SettingsManager::LoadResult::RecoveredFromCorruption
         || loadResult == SettingsManager::LoadResult::RecoveredFromNewerSchema) {

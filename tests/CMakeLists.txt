@@ -12,6 +12,9 @@ endfunction()
 launcher_add_test(PortableTests)
 launcher_add_test(SettingsTests)
 launcher_add_test(LoggerTests)
+launcher_add_test(RegistryTests)
+launcher_add_test(GitHubClientTests)
+launcher_add_test(RegistryManagerTests)
 
 # The UI test runs without a visible window. Screenshots of every page are
 # written to the build directory for visual review.

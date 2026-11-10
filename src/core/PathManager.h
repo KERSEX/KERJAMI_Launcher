@@ -44,6 +44,8 @@ public:
     QString stateFile() const;    ///< launcher/launcher.json
     QString lockFile() const;     ///< launcher/launcher.lock
 
+    QString registryCacheFile() const; ///< cache/registry.json - last valid registry
+
     /// All folders that hold user data and are created by prepare().
     QStringList dataDirectories() const;
 
