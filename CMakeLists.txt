@@ -142,6 +142,11 @@ target_include_directories(launcher_core
     PUBLIC src
     PRIVATE "${LAUNCHER_GENERATED_DIR}")
 target_link_libraries(launcher_core PUBLIC launcher_base Qt6::Core Qt6::Network PRIVATE Qt6::ZlibPrivate)
+# The list of approved projects is part of the program (docs/03-entscheidungen.md, D-43).
+qt_add_resources(launcher_core "launcher_registry"
+    PREFIX "/"
+    BASE resources
+    FILES resources/registry/projects.json)
 launcher_target_defaults(launcher_core)
 
 # --- User interface -----------------------------------------------------------

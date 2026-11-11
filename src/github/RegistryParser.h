@@ -81,8 +81,13 @@ bool isValidRepository(const QString& repository);
 /// A single folder name, safe on Windows: no path, no reserved device name, no trailing dot.
 bool isValidInstallDirectory(const QString& directory);
 
-/// A ZIP file name; "*" is the only wildcard.
+/// The name of a release file: a ZIP archive or a single program (".exe"); "*" is
+/// the only wildcard.
 bool isValidAssetPattern(const QString& pattern);
+
+/// True if the pattern names a single program instead of a ZIP archive. The file
+/// is then installed as it is, under the name the entry gives as "executable".
+bool isSingleFileAsset(const QString& pattern);
 
 /// The text a release tag starts with before the version: 1 to 32 letters, digits,
 /// ".", "_" or "-", beginning with a letter. No "/", so that a tag stays one path

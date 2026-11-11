@@ -23,9 +23,6 @@ namespace launcher::ui {
 
 namespace {
 
-using Problem = RegistryManager::Problem;
-using Source = RegistryManager::Source;
-
 /// Sorted, without duplicates that differ only in case.
 QStringList uniqueSorted(const QStringList& values)
 {
@@ -53,33 +50,6 @@ void fillFilter(ComboBox* box, const QString& allLabel, const QStringList& value
     box->setCurrentIndex(index >= 0 ? index : 0);
 }
 
-QString problemText(Problem problem, int httpStatus)
-{
-    switch (problem) {
-    case Problem::None:
-        break;
-    case Problem::Unreachable:
-        return LibraryPage::tr("Keine Verbindung zu GitHub.");
-    case Problem::RateLimited:
-        return LibraryPage::tr("GitHub nimmt vorübergehend keine weiteren Anfragen an.");
-    case Problem::Http:
-        if (httpStatus == 404)
-            return LibraryPage::tr("Die Registry wurde auf GitHub nicht gefunden (HTTP 404).");
-        return LibraryPage::tr("GitHub antwortete mit HTTP %1.").arg(httpStatus);
-    case Problem::InvalidContent:
-        return LibraryPage::tr("Die Registry enthält keine gültigen Daten.");
-    case Problem::UnsupportedVersion:
-        return LibraryPage::tr("Die Registry benötigt eine neuere Version von %1.")
-            .arg(branding::productName());
-    }
-    return {};
-}
-
-QString timeText(const QDateTime& time)
-{
-    return time.isValid() ? QLocale().toString(time.toLocalTime(), QLocale::ShortFormat) : QString();
-}
-
 QString projectCountText(qsizetype count)
 {
     return count == 1 ? LibraryPage::tr("1 Projekt") : LibraryPage::tr("%1 Projekte").arg(count);
@@ -88,7 +58,7 @@ QString projectCountText(qsizetype count)
 } // namespace
 
 LibraryPage::LibraryPage(const AppContext& context, QWidget* parent)
-    : Page(tr("Bibliothek"), tr("Alle freigegebenen Projekte aus der offiziellen Registry."), parent)
+    : Page(tr("Bibliothek"), tr("Alle freigegebenen Projekte."), parent)
     , m_context(context)
     , m_registry(context.registry)
 {
@@ -99,10 +69,6 @@ LibraryPage::LibraryPage(const AppContext& context, QWidget* parent)
     m_search->setPlaceholderText(tr("Projekte durchsuchen …"));
     m_search->setAccessibleName(tr("Suche"));
     searchRow->addWidget(m_search, 1);
-    m_refresh = new QPushButton(tr("Aktualisieren"), this);
-    m_refresh->setObjectName("LibraryRefresh");
-    m_refresh->setCursor(Qt::PointingHandCursor);
-    searchRow->addWidget(m_refresh);
     contentLayout()->addLayout(searchRow);
 
     auto* filterRow = new QHBoxLayout;
@@ -140,7 +106,6 @@ LibraryPage::LibraryPage(const AppContext& context, QWidget* parent)
     connect(m_category, &QComboBox::activated, this, &LibraryPage::rebuildList);
     connect(m_tag, &QComboBox::activated, this, &LibraryPage::rebuildList);
     connect(m_featuredOnly, &QAbstractButton::toggled, this, &LibraryPage::rebuildList);
-    connect(m_refresh, &QPushButton::clicked, &m_registry, &RegistryManager::refresh);
     connect(&m_registry, &RegistryManager::changed, this, &LibraryPage::onRegistryChanged);
 
     onRegistryChanged();
@@ -157,36 +122,16 @@ void LibraryPage::onRegistryChanged()
     fillFilter(m_category, tr("Alle Kategorien"), uniqueSorted(categories));
     fillFilter(m_tag, tr("Alle Tags"), uniqueSorted(tags));
 
-    m_refresh->setEnabled(!m_registry.isLoading());
     m_status->setText(statusText());
     rebuildList();
 }
 
 QString LibraryPage::statusText() const
 {
-    if (m_registry.isLoading())
-        return tr("Registry wird geladen …");
-
-    const QString counted = projectCountText(m_registry.projects().size());
-    const QString time = timeText(m_registry.fetchedAt());
-
-    if (m_registry.problem() != Problem::None) {
-        // Without any list the error card below says the same, so it is not repeated here.
-        if (m_registry.source() == Source::None)
-            return {};
-        return problemText(m_registry.problem(), m_registry.httpStatus()) + u' '
-            + tr("Angezeigt wird die gespeicherte Liste vom %1 (%2).").arg(time, counted);
-    }
-
-    switch (m_registry.source()) {
-    case Source::Network:
-        return tr("Aktuell · %1 · geladen %2").arg(counted, time);
-    case Source::Cache:
-        return tr("Gespeicherte Liste vom %1 · %2").arg(time, counted);
-    case Source::None:
-        break;
-    }
-    return {};
+    // With no project the card below says what there is to say.
+    if (m_registry.projects().isEmpty())
+        return {};
+    return projectCountText(m_registry.projects().size());
 }
 
 QList<Project> LibraryPage::filteredProjects() const
@@ -263,24 +208,18 @@ void LibraryPage::rebuildList()
         card->body()->addWidget(state);
         m_listLayout->addWidget(card);
     };
-    const auto loadAgain = [this] { m_registry.refresh(); };
 
     if (m_registry.projects().isEmpty()) {
-        if (m_registry.isLoading()) {
-            addMessage(
-                Glyph::Library, tr("Registry wird geladen …"), tr("Einen Moment bitte."), {}, "", loadAgain);
-        } else if (m_registry.source() == Source::None && m_registry.problem() != Problem::None) {
-            addMessage(Glyph::Warning, tr("Projekte konnten nicht geladen werden"),
-                problemText(m_registry.problem(), m_registry.httpStatus()), tr("Erneut versuchen"),
-                "LibraryRetry", loadAgain);
-        } else if (m_registry.source() == Source::None) {
-            addMessage(Glyph::Library, tr("Registry noch nicht geladen"),
-                tr("Die Projektliste wurde noch nicht von GitHub abgerufen."), tr("Jetzt laden"),
-                "LibraryRetry", loadAgain);
+        if (!m_registry.error().isEmpty()) {
+            // The list is part of the program, so this means a broken build.
+            addMessage(Glyph::Warning, tr("Die Projektliste ist nicht lesbar"),
+                tr("Installiere %1 bitte neu.").arg(branding::productName()), {}, "", [] { });
         } else {
             addMessage(Glyph::Library, tr("Noch keine Projekte freigegeben"),
-                tr("Sobald Projekte in die Registry aufgenommen werden, erscheinen sie hier."), {}, "",
-                loadAgain);
+                tr("Neue Projekte kommen mit einem Update von %1. Sobald eines freigegeben ist, erscheint es "
+                   "hier.")
+                    .arg(branding::productName()),
+                {}, "", [] { });
         }
         return;
     }

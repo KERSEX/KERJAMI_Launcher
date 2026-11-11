@@ -86,7 +86,6 @@ GitHubClient::Policy GitHubClient::Policy::production()
     Policy policy;
     policy.schemes = {u"https"_s};
     policy.hosts = {
-        u"raw.githubusercontent.com"_s,     // registry file
         u"api.github.com"_s,                // releases
         u"github.com"_s,                    // release downloads
         u"objects.githubusercontent.com"_s, // where release downloads are redirected to

@@ -74,6 +74,7 @@ class RegistryTests : public QObject {
 private slots:
     void parsesAFullEntry();
     void optionalFieldsHaveDefaults();
+    void aSingleProgramReleaseNeedsAFileNameAsExecutable();
     void unknownFieldsAreIgnored();
     void displayTextIsTrimmed();
     void tagsAreDeduplicated();
@@ -156,6 +157,34 @@ void RegistryTests::optionalFieldsHaveDefaults()
     QVERIFY(!result.projects.first().featured);
     QCOMPARE(result.projects.first().releaseChannel, launcher::ReleaseChannel::Stable);
     QVERIFY(result.projects.first().tagPrefix.isEmpty()); // the tag is the version
+}
+
+void RegistryTests::aSingleProgramReleaseNeedsAFileNameAsExecutable()
+{
+    // A release that is just the program (KERS Overlay publishes one): the entry names the file it
+    // is installed under, so "executable" is a name and not a path.
+    QJsonObject single = entry(u"overlay"_s);
+    single.insert(u"asset_pattern"_s, u"KERS_Subsystems.exe"_s);
+    single.insert(u"executable"_s, u"KERS_Subsystems.exe"_s);
+
+    QJsonObject withPath = entry(u"other"_s);
+    withPath.insert(u"asset_pattern"_s, u"Tool-*.exe"_s);
+    withPath.insert(u"executable"_s, u"bin/Tool.exe"_s);
+
+    // The same path is fine for a ZIP.
+    QJsonObject zipWithPath = entry(u"third"_s);
+    zipWithPath.insert(u"executable"_s, u"bin/Tool.exe"_s);
+
+    const RegistryParseResult result = RP::parse(document({single, withPath, zipWithPath}));
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.projects.size(), 2);
+    QCOMPARE(result.projects.at(0).id, u"overlay"_s);
+    QVERIFY(RP::isSingleFileAsset(result.projects.at(0).assetPattern));
+    QCOMPARE(result.projects.at(1).id, u"third"_s);
+    QVERIFY(!RP::isSingleFileAsset(result.projects.at(1).assetPattern));
+    QCOMPARE(result.issues.size(), 1);
+    QCOMPARE(result.issues.first().projectId, u"other"_s);
+    QVERIFY(result.issues.first().message.contains(u"plain file name"_s));
 }
 
 void RegistryTests::unknownFieldsAreIgnored()
@@ -357,7 +386,7 @@ void RegistryTests::invalidEntryIsDroppedAndOthersSurvive_data()
     row("release channel is a number", u"release_channel"_s, u"1"_s);
 
     row("asset pattern missing", u"asset_pattern"_s, {});
-    row("asset pattern is not a zip", u"asset_pattern"_s, quoted(u"app.exe"_s));
+    row("asset pattern is neither a zip nor an exe", u"asset_pattern"_s, quoted(u"app.msi"_s));
     row("asset pattern with parent folder", u"asset_pattern"_s, quoted(u"../app.zip"_s));
     row("asset pattern with slash", u"asset_pattern"_s, quoted(u"a/b.zip"_s));
     row("asset pattern with backslash", u"asset_pattern"_s, uR"("a\\b.zip")"_s);
@@ -619,7 +648,12 @@ void RegistryTests::assetPatterns_data()
     QTest::newRow("only a wildcard") << u"*.zip"_s << true;
     QTest::newRow("uppercase extension") << u"APP.ZIP"_s << true;
     QTest::newRow("brackets and plus") << u"app+(1).zip"_s << true;
-    QTest::newRow("not a zip") << u"app.exe"_s << false;
+    QTest::newRow("a single program") << u"KERS_Subsystems.exe"_s << true;
+    QTest::newRow("a single program with a wildcard") << u"Tool-*-x64.exe"_s << true;
+    QTest::newRow("uppercase exe") << u"APP.EXE"_s << true;
+    QTest::newRow("installer package") << u"app.msi"_s << false;
+    QTest::newRow("seven zip") << u"app.7z"_s << false;
+    QTest::newRow("exe in the middle") << u"app.exe.txt"_s << false;
     QTest::newRow("tar") << u"app.tar.gz"_s << false;
     QTest::newRow("no extension") << u"app"_s << false;
     QTest::newRow("slash") << u"a/app.zip"_s << false;

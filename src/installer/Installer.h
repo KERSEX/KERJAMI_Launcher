@@ -24,6 +24,7 @@ enum class InstallError {
     HashMismatch,      ///< The file is not the one the release announced.
     ArchiveUnreadable, ///< Not a ZIP file, damaged, or a ZIP feature the launcher does not support.
     ArchiveRejected,   ///< The archive breaks a safety rule, see InstallResult::validation.
+    NotAProgram,       ///< A single-file release that is not a Windows program.
     InsufficientSpace,
     PathTooLong,        ///< The launcher folder lies so deep that Windows paths would exceed their limit.
     ExtractionFailed,   ///< Writing the files failed (disk, permissions, damaged data).
@@ -38,8 +39,8 @@ struct InstallRequest {
     Project project; ///< Checked again by the installer.
     QString version; ///< Semantic version of the release.
     QString tag;
-    QString archivePath; ///< The downloaded ZIP.
-    QString sha256;      ///< Expected hash of the archive. Required.
+    QString archivePath; ///< The downloaded file: a ZIP, or the program itself for a single-file release.
+    QString sha256;      ///< Expected hash of the file. Required.
 };
 
 struct InstallResult {
@@ -56,8 +57,9 @@ struct InstallResult {
 /// The order is fixed and every step has to succeed before the next one starts:
 ///   1. check the project and that it is not running,
 ///   2. verify the archive's SHA-256,
-///   3. open the archive and validate every entry (ArchiveValidator),
-///   4. extract into temp/staging-<id>/ and check the start file,
+///   3. open the archive and validate every entry (ArchiveValidator); a single-file
+///      release (".exe" asset) has no archive: the file must be a Windows program,
+///   4. extract into temp/staging-<id>/ (or copy the program there) and check the start file,
 ///   5. move the installed version to backups/<version>/,
 ///   6. move the staging folder to current/,
 ///   7. register the new version.

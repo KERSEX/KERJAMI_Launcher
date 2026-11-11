@@ -58,9 +58,6 @@ using launcher::ui::ProjectCard;
 
 namespace {
 
-/// Nothing listens here, so a refresh fails with "no connection".
-const QUrl kRegistryUrl(u"http://127.0.0.1:9/projects.json"_s);
-
 QJsonObject projectEntry(
     const QString& id, const QString& name, const QString& category, const QStringList& tags, bool featured)
 {
@@ -81,22 +78,15 @@ QJsonObject projectEntry(
     };
 }
 
-/// Writes a registry cache file as RegistryManager would have left it.
-bool writeRegistryCache(const QString& path, const QJsonArray& projects)
+/// Gives the manager a list of projects, as the file compiled into the program would.
+bool loadProjects(RegistryManager& registry, const QJsonArray& projects)
 {
-    const QJsonObject registry {
+    const QJsonObject document {
         {u"schema_version"_s, 1},
         {u"registry_name"_s, u"Testregistry"_s},
         {u"projects"_s, projects},
     };
-    const QJsonObject cache {
-        {u"cache_schema"_s, 1},
-        {u"fetched_at"_s, u"2026-11-10T12:00:00Z"_s},
-        {u"registry_url"_s, kRegistryUrl.toString()},
-        {u"registry"_s, registry},
-    };
-    QFile file(path);
-    return file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(cache).toJson()) > 0;
+    return registry.load(QJsonDocument(document).toJson());
 }
 
 QJsonArray sampleProjects()
@@ -134,12 +124,10 @@ private slots:
     void settingsControlsPersistChanges();
     void rendersEveryPage();
 
-    void libraryExplainsThatNothingWasLoaded();
-    void libraryShowsProjectsFromTheCache();
+    void libraryExplainsThatThereAreNoProjects();
+    void libraryExplainsAnUnreadableList();
+    void libraryShowsTheProjectsOfTheList();
     void libraryFiltersCombine();
-    void libraryKeepsTheStoredListWhenRefreshFails();
-    void libraryShowsAnErrorWithoutAStoredList();
-    void libraryRefreshButtonShowsLoadingState();
 
     void cardOffersInstallationForANewProject();
     void cardShowsAnInstalledProject();
@@ -248,11 +236,10 @@ void UiSmokeTests::init()
 
     // A client that may talk to the local machine only. Tests never reach GitHub.
     m_client = std::make_unique<GitHubClient>(GitHubClient::Policy {{u"http"_s}, {u"127.0.0.1"_s}, true});
-    m_registry = std::make_unique<RegistryManager>(*m_client, m_paths->registryCacheFile(), kRegistryUrl);
+    m_registry = std::make_unique<RegistryManager>();
     FetchOptions quick;
     quick.maxAttempts = 1;
     quick.timeoutMs = 2000;
-    m_registry->setFetchOptions(quick);
     m_downloads = std::make_unique<DownloadManager>(*m_client, m_paths->tempDir(), m_paths->downloadsDir());
     m_downloads->setFetchOptions(quick);
 
@@ -431,12 +418,12 @@ void UiSmokeTests::brandImagesAreEmbedded()
 
 void UiSmokeTests::settingsControlsShowStoredValues()
 {
-    QVERIFY(m_settings->setRegistryAutoCheck(false));
     QVERIFY(m_settings->setUpdateCheckIntervalMinutes(360));
     QVERIFY(m_settings->setStartPage(StartPage::Library));
 
     MainWindow window(context());
-    QVERIFY(!find<QAbstractButton>(window, "RegistryAutoCheck")->isChecked());
+    // The list of projects is part of the program, so there is nothing to switch on or off for it.
+    QVERIFY(window.findChild<QAbstractButton*>(u"RegistryAutoCheck"_s) == nullptr);
     QVERIFY(find<QAbstractButton>(window, "LauncherUpdateAutoCheck")->isChecked());
     QCOMPARE(find<QComboBox>(window, "CheckInterval")->currentData().toInt(), 360);
     QCOMPARE(
@@ -451,11 +438,6 @@ void UiSmokeTests::settingsControlsPersistChanges()
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.showPage(PageId::Settings);
     QTest::qWait(250); // let the page transition finish
-
-    auto* registryToggle = find<QAbstractButton>(window, "RegistryAutoCheck");
-    QVERIFY(registryToggle->isChecked());
-    QTest::mouseClick(registryToggle, Qt::LeftButton);
-    QVERIFY(!registryToggle->isChecked());
 
     auto* launcherToggle = find<QAbstractButton>(window, "LauncherUpdateAutoCheck");
     QTest::keyClick(launcherToggle, Qt::Key_Space);
@@ -472,7 +454,6 @@ void UiSmokeTests::settingsControlsPersistChanges()
     // What the next start of the launcher would read from disk.
     SettingsManager restarted(m_paths->settingsFile());
     QCOMPARE(restarted.load(), SettingsManager::LoadResult::Loaded);
-    QVERIFY(!restarted.settings().registryAutoCheck);
     QVERIFY(!restarted.settings().launcherUpdateAutoCheck);
     QCOMPARE(restarted.settings().updateCheckIntervalMinutes, 180);
     QCOMPARE(restarted.settings().startPage, StartPage::Library);
@@ -520,7 +501,7 @@ void UiSmokeTests::rendersEveryPage()
     }
 }
 
-void UiSmokeTests::libraryExplainsThatNothingWasLoaded()
+void UiSmokeTests::libraryExplainsThatThereAreNoProjects()
 {
     MainWindow window(context());
     window.show();
@@ -528,15 +509,37 @@ void UiSmokeTests::libraryExplainsThatNothingWasLoaded()
     window.showPage(PageId::Library);
 
     QVERIFY(shownProjects(window).isEmpty());
-    QVERIFY(find<QAbstractButton>(window, "LibraryRetry"));
     QVERIFY(find<QLabel>(window, "LibraryStatus")->text().isEmpty());
-    QVERIFY(find<QAbstractButton>(window, "LibraryRefresh")->isEnabled());
+    bool explained = false;
+    for (const QLabel* label : window.findChildren<QLabel*>())
+        explained = explained || label->text().contains(u"Noch keine Projekte freigegeben"_s);
+    QVERIFY(explained);
+    // Nothing is loaded from anywhere, so there is nothing to retry or refresh.
+    QVERIFY(window.findChild<QAbstractButton*>(u"LibraryRetry"_s) == nullptr);
+    QVERIFY(window.findChild<QAbstractButton*>(u"LibraryRefresh"_s) == nullptr);
+    saveScreenshot(window, u"library-empty"_s);
 }
 
-void UiSmokeTests::libraryShowsProjectsFromTheCache()
+void UiSmokeTests::libraryExplainsAnUnreadableList()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    // The list is compiled in, so this is a broken build; the page still says something useful.
+    QVERIFY(!m_registry->load("{ not json"));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+
+    QVERIFY(shownProjects(window).isEmpty());
+    bool explained = false;
+    for (const QLabel* label : window.findChildren<QLabel*>())
+        explained = explained || label->text().contains(u"nicht lesbar"_s);
+    QVERIFY(explained);
+}
+
+void UiSmokeTests::libraryShowsTheProjectsOfTheList()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QCOMPARE(m_registry->projects().size(), 4);
 
     MainWindow window(context());
@@ -548,8 +551,7 @@ void UiSmokeTests::libraryShowsProjectsFromTheCache()
     // Featured projects first, each group alphabetical.
     QCOMPARE(shownProjects(window),
         (QStringList {u"kers-overlay"_s, u"setup-sharing"_s, u"lap-timer"_s, u"pit-radio"_s}));
-    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().contains(u"Gespeicherte Liste"_s));
-    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().contains(u"4 Projekte"_s));
+    QCOMPARE(find<QLabel>(window, "LibraryStatus")->text(), u"4 Projekte"_s);
     QVERIFY(find<QAbstractButton>(window, "LibraryRetry") == nullptr);
 
     // Filter boxes list what the registry contains, once each and sorted.
@@ -571,8 +573,7 @@ void UiSmokeTests::libraryShowsProjectsFromTheCache()
 
 void UiSmokeTests::libraryFiltersCombine()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
@@ -618,74 +619,6 @@ void UiSmokeTests::libraryFiltersCombine()
 
     featured->click();
     QCOMPARE(shownProjects(window), (QStringList {u"kers-overlay"_s, u"setup-sharing"_s}));
-}
-
-void UiSmokeTests::libraryKeepsTheStoredListWhenRefreshFails()
-{
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
-    MainWindow window(context());
-    window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
-
-    QSignalSpy finished(m_registry.get(), &RegistryManager::refreshFinished);
-    m_registry->refresh();
-    QVERIFY(finished.wait(10000));
-    QCOMPARE(finished.at(0).at(0).toBool(), false);
-
-    QCOMPARE(shownProjects(window).size(), 4);
-    const QString status = find<QLabel>(window, "LibraryStatus")->text();
-    QVERIFY2(status.contains(u"Keine Verbindung zu GitHub"_s), qPrintable(status));
-    QVERIFY2(status.contains(u"gespeicherte Liste"_s), qPrintable(status));
-    saveScreenshot(window, u"library-offline-with-cache"_s);
-}
-
-void UiSmokeTests::libraryShowsAnErrorWithoutAStoredList()
-{
-    MainWindow window(context());
-    window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
-
-    QSignalSpy finished(m_registry.get(), &RegistryManager::refreshFinished);
-    m_registry->refresh();
-    QVERIFY(finished.wait(10000));
-
-    QVERIFY(shownProjects(window).isEmpty());
-    QVERIFY(find<QAbstractButton>(window, "LibraryRetry"));
-    bool titleShown = false;
-    bool reasonShown = false;
-    for (const QLabel* label : window.findChildren<QLabel*>()) {
-        titleShown = titleShown || label->text().contains(u"konnten nicht geladen werden"_s);
-        reasonShown = reasonShown || label->text().contains(u"Keine Verbindung zu GitHub"_s);
-    }
-    QVERIFY(titleShown);
-    QVERIFY(reasonShown);
-    // The error card carries the message; the status line does not repeat it.
-    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().isEmpty());
-    saveScreenshot(window, u"library-offline-empty"_s);
-}
-
-void UiSmokeTests::libraryRefreshButtonShowsLoadingState()
-{
-    MainWindow window(context());
-    window.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
-
-    auto* refresh = find<QAbstractButton>(window, "LibraryRefresh");
-    QVERIFY(refresh->isEnabled());
-    QSignalSpy finished(m_registry.get(), &RegistryManager::refreshFinished);
-
-    refresh->click();
-    QVERIFY(m_registry->isLoading());
-    QVERIFY(!refresh->isEnabled());
-    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().contains(u"wird geladen"_s));
-
-    QVERIFY(finished.wait(10000));
-    QVERIFY(!m_registry->isLoading());
-    QVERIFY(refresh->isEnabled());
 }
 
 void UiSmokeTests::downloadsPageStartsEmpty()
@@ -827,8 +760,7 @@ template <typename T> T* findIn(QWidget& parent, const char* name)
 
 void UiSmokeTests::cardOffersInstallationForANewProject()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
 
     MainWindow window(context());
     window.show();
@@ -849,8 +781,7 @@ void UiSmokeTests::cardOffersInstallationForANewProject()
 
 void UiSmokeTests::cardShowsAnInstalledProject()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
 
     MainWindow window(context());
@@ -880,8 +811,7 @@ void UiSmokeTests::cardShowsAnInstalledProject()
 
 void UiSmokeTests::cardAsksBeforeUninstalling()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
 
     MainWindow window(context());
@@ -922,8 +852,7 @@ void UiSmokeTests::cardAsksBeforeUninstalling()
 
 void UiSmokeTests::cardShowsWhyInstallingFailed()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
 
     MainWindow window(context());
     window.show();
@@ -976,8 +905,7 @@ QByteArray releaseListFor(const QString& version, const QString& notes)
 
 void UiSmokeTests::cardAnnouncesAnUpdateAndAsksBeforeStarting()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
     m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues Fahrzeugmodell\n- Fehler behoben"_s);
 
@@ -1047,8 +975,7 @@ void UiSmokeTests::cardAnnouncesAnUpdateAndAsksBeforeStarting()
 
 void UiSmokeTests::cardLetsTheUserChooseTheUpdateMode()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
 
     MainWindow window(context());
@@ -1092,8 +1019,7 @@ void UiSmokeTests::cardLetsTheUserChooseTheUpdateMode()
 
 void UiSmokeTests::cardShowsARunningProjectAndAnUnexpectedEnd()
 {
-    QVERIFY(writeRegistryCache(m_paths->registryCacheFile(), sampleProjects()));
-    m_registry->loadCache();
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(sleepy::install(
         *m_layout, *m_installed, u"lap-timer"_s, u"lap-timer"_s, u"1.4.2"_s, u"lap-timer.exe"_s));
     const QString current = m_layout->currentDir(u"lap-timer"_s);

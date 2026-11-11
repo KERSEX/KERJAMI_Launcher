@@ -327,6 +327,110 @@ private slots:
         QCOMPARE(readFile(backups(u"unknown/bin/Tool.exe"_s)), QByteArray("OLD"));
     }
 
+    // --- a release that is a single program, not a ZIP -------------------------
+
+    /// A project whose release file is the program itself, like KERS Overlay's.
+    void useSingleFileProject()
+    {
+        m_project.assetPattern = u"Tool*.exe"_s;
+        m_project.executable = u"Tool.exe"_s;
+    }
+
+    /// A downloaded program: "MZ" like every Windows program, then a body that tells the versions apart.
+    InstallRequest programRequest(const QString& version, const QByteArray& content = {})
+    {
+        InstallRequest request;
+        request.project = m_project;
+        request.version = version;
+        request.tag = u"Tool"_s + version;
+        request.archivePath = root(u"downloads/test-tool/Tool_"_s + version + u".exe"_s);
+        const QByteArray bytes = content.isNull()
+            ? QByteArray("MZ") + QByteArray(100, 'x') + "PROGRAM-" + version.toUtf8()
+            : content;
+        [&] { QVERIFY(writeFile(request.archivePath, bytes)); }();
+        request.sha256 = launcher::HashVerifier::sha256File(request.archivePath);
+        return request;
+    }
+
+    void install_singleFile_fresh()
+    {
+        useSingleFileProject();
+        QSignalSpy progress(m_installer.get(), &Installer::progress);
+        const InstallResult result = installAndWait(programRequest(u"1.0.0"_s));
+        QVERIFY2(result.ok(), qPrintable(result.detail));
+
+        // The program, under the name from the project entry, and nothing else in the folder.
+        QVERIFY(readFile(current(u"Tool.exe"_s)).endsWith("PROGRAM-1.0.0"));
+        QCOMPARE(
+            QDir(current()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot), QStringList {u"Tool.exe"_s});
+        const auto record = m_installed->get(u"test-tool"_s);
+        QVERIFY(record.has_value());
+        QCOMPARE(record->version, u"1.0.0"_s);
+        QCOMPARE(record->executable, u"Tool.exe"_s);
+        QVERIFY2(leftovers().isEmpty(), qPrintable(leftovers().join(u','))); // no staging folder remains
+        QVERIFY(progress.size() >= 2);
+    }
+
+    void install_singleFile_updateKeepsBackupAndRollsBack()
+    {
+        useSingleFileProject();
+        QVERIFY(installAndWait(programRequest(u"1.0.0"_s)).ok());
+        const InstallResult updated = installAndWait(programRequest(u"2.0.0"_s));
+        QVERIFY2(updated.ok(), qPrintable(updated.detail));
+        QVERIFY(readFile(current(u"Tool.exe"_s)).endsWith("PROGRAM-2.0.0"));
+        QVERIFY(readFile(backups(u"1.0.0/Tool.exe"_s)).endsWith("PROGRAM-1.0.0"));
+        QCOMPARE(m_installed->get(u"test-tool"_s)->version, u"2.0.0"_s);
+
+        // A third version that fails on the way leaves 2.0.0 as it was.
+        const InstallResult bad = installAndWait(programRequest(u"3.0.0"_s, "this is not a program"));
+        QCOMPARE(bad.error, InstallError::NotAProgram);
+        QVERIFY(readFile(current(u"Tool.exe"_s)).endsWith("PROGRAM-2.0.0"));
+        QCOMPARE(m_installed->get(u"test-tool"_s)->version, u"2.0.0"_s);
+        QVERIFY(leftovers().isEmpty());
+    }
+
+    void install_singleFile_mustBeAWindowsProgram_data()
+    {
+        QTest::addColumn<QByteArray>("content");
+        QTest::newRow("a ZIP archive") << (QByteArray("PK\x03\x04") + QByteArray(200, 'z'));
+        QTest::newRow("a script") << (QByteArray("#!/bin/sh\n") + QByteArray(200, ' '));
+        QTest::newRow("text") << QByteArray(300, 'a');
+        QTest::newRow("only the signature") << QByteArray("MZ");
+        QTest::newRow("too small to be a program") << (QByteArray("MZ") + QByteArray(40, 'x'));
+        QTest::newRow("signature in the wrong case") << (QByteArray("mz") + QByteArray(200, 'x'));
+    }
+
+    void install_singleFile_mustBeAWindowsProgram()
+    {
+        QFETCH(QByteArray, content);
+        useSingleFileProject();
+        // The hash is right (it is the hash of exactly this file); the file still is no program.
+        const InstallResult result = installAndWait(programRequest(u"1.0.0"_s, content));
+        QCOMPARE(result.error, InstallError::NotAProgram);
+        QVERIFY(!QFileInfo::exists(current(u"Tool.exe"_s)));
+        QVERIFY(!m_installed->get(u"test-tool"_s).has_value());
+        QVERIFY(leftovers().isEmpty());
+    }
+
+    void install_singleFile_stillNeedsTheRightHash()
+    {
+        useSingleFileProject();
+        InstallRequest request = programRequest(u"1.0.0"_s);
+        request.sha256 = QString(64, u'0');
+        QCOMPARE(installAndWait(request).error, InstallError::HashMismatch);
+        request.sha256.clear();
+        QCOMPARE(installAndWait(request).error, InstallError::NoTrustedHash);
+        QVERIFY(!QFileInfo::exists(current(u"Tool.exe"_s)));
+    }
+
+    void install_singleFile_executableIsAFileNameNotAPath()
+    {
+        useSingleFileProject();
+        m_project.executable = u"bin/Tool.exe"_s; // a path makes no sense for a single file
+        QCOMPARE(installAndWait(programRequest(u"1.0.0"_s)).error, InstallError::InvalidProject);
+        QVERIFY(!QFileInfo::exists(current(u"bin"_s)));
+    }
+
     // --- integrity ----------------------------------------------------------
 
     void install_hashProblems()

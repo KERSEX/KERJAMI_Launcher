@@ -123,18 +123,13 @@ int Application::run()
     SettingsManager settings(paths.settingsFile());
     const SettingsManager::LoadResult loadResult = settings.load();
 
-    // The client is created before the registry and destroyed after it, so a
-    // request that is still running at shutdown is cancelled while its client exists.
+    // The client is created first and destroyed last, so a request that is still
+    // running at shutdown is cancelled while its client exists.
     GitHubClient client(GitHubClient::Policy::production());
-    RegistryManager registry(client, paths.registryCacheFile(), branding::registryUrl());
-    registry.loadCache();
 
-    const auto applyRegistrySettings = [&settings, &registry] {
-        const LauncherSettings& current = settings.settings();
-        registry.setAutoRefresh(current.registryAutoCheck, current.updateCheckIntervalMinutes);
-    };
-    applyRegistrySettings();
-    QObject::connect(&settings, &SettingsManager::settingsChanged, &registry, applyRegistrySettings);
+    // The list of approved projects is part of the program (D-43).
+    RegistryManager registry;
+    registry.loadBuiltIn();
 
     // Created after the client and destroyed before it: running transfers are
     // stopped and their partial files removed while the client still exists.
@@ -210,9 +205,6 @@ int Application::run()
         showStartupMessage(ui::recoveryMessage(*startup.recovery));
     if (startup.report)
         showStartupMessage(ui::updateReportMessage(*startup.report));
-
-    if (settings.settings().registryAutoCheck)
-        registry.refresh();
 
     if (loadResult == SettingsManager::LoadResult::RecoveredFromCorruption
         || loadResult == SettingsManager::LoadResult::RecoveredFromNewerSchema) {

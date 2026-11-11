@@ -131,8 +131,9 @@ void GitHubClientTests::productionPolicy_data()
     QTest::addColumn<QString>("url");
     QTest::addColumn<bool>("allowed");
 
-    QTest::newRow("registry file")
-        << u"https://raw.githubusercontent.com/KERSEX/Registry/main/projects.json"_s << true;
+    // The list of projects is built into the program; its former home is not reachable any more.
+    QTest::newRow("raw file host")
+        << u"https://raw.githubusercontent.com/KERSEX/Registry/main/projects.json"_s << false;
     QTest::newRow("api") << u"https://api.github.com/repos/KERSEX/App/releases"_s << true;
     QTest::newRow("release download")
         << u"https://github.com/KERSEX/App/releases/download/v1.0.0/App.zip"_s << true;
@@ -720,11 +721,6 @@ void GitHubClientTests::liveGitHub()
     QCOMPARE(repository.value("name"_L1).toString(), u"KERJAMI_Launcher"_s);
     QVERIFY(client.rateLimit().isKnown());
     qInfo() << "Request budget:" << client.rateLimit().remaining << "of" << client.rateLimit().limit;
-
-    // The registry may or may not exist yet; both answers prove that the connection works.
-    const NetworkResult registry = fetch(client, launcher::branding::registryUrl(), {});
-    qInfo() << "Registry:" << (registry.ok() ? u"HTTP 200"_s : u"HTTP %1"_s.arg(registry.httpStatus));
-    QVERIFY2(registry.ok() || registry.error == NetworkError::HttpError, qPrintable(registry.detail));
 }
 
 QTEST_GUILESS_MAIN(GitHubClientTests)

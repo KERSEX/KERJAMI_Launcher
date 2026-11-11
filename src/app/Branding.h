@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QString>
-#include <QUrl>
 
 /// Product identity and distribution endpoints.
 ///
@@ -29,8 +28,5 @@ QString launcherRepository();
 
 /// File name pattern of the portable ZIP of a launcher release, "*" for the version.
 QString updateAssetPattern();
-
-/// HTTPS address of the official project registry. Not user-configurable.
-QUrl registryUrl();
 
 } // namespace launcher::branding

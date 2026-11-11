@@ -68,6 +68,9 @@ Der Auftrag nannte `KERSEX/CommunityLauncher` als Launcher-Repository. Das Team 
 Phase 2 braucht das Registry-Repository mit einer `projects.json`, Phase 6 braucht Releases im
 Launcher-Repository. Beide müssen öffentlich sein, weil der Launcher ohne Anmeldung arbeitet.
 
+**Nachtrag 2026-11-11:** Das Registry-Repository entfällt. Die Projektliste steckt im Launcher
+(`03-entscheidungen.md`, D-43).
+
 ### 3. KERS Overlay ist nur ein Beispielprojekt
 
 Laut Team ist `KERSEX/KERS_Overlay` ein anderes Projekt und dient nur als Beispiel für etwas, das

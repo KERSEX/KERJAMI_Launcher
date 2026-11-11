@@ -175,15 +175,7 @@ private:
     {
         const QJsonObject registry {
             {u"schema_version"_s, 1}, {u"registry_name"_s, u"Test"_s}, {u"projects"_s, projects}};
-        const QJsonObject cache {{u"cache_schema"_s, 1}, {u"fetched_at"_s, u"2026-11-10T12:00:00Z"_s},
-            {u"registry_url"_s, m_server->url(u"/projects.json"_s).toString()}, {u"registry"_s, registry}};
-        QDir().mkpath(m_paths->cacheDir());
-        QFile file(m_paths->registryCacheFile());
-        if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(cache).toJson()) <= 0)
-            return false;
-        file.close();
-        m_registry->loadCache();
-        return true;
+        return m_registry->load(QJsonDocument(registry).toJson());
     }
 
     /// A project, installed at the given version (a real program, started from its folder).
@@ -257,8 +249,7 @@ private slots:
             launcher::GitHubClient::Policy {{u"http"_s}, {u"127.0.0.1"_s}, true});
         m_settings = std::make_unique<launcher::SettingsManager>(m_paths->settingsFile());
         m_settings->load();
-        m_registry = std::make_unique<launcher::RegistryManager>(
-            *m_client, m_paths->registryCacheFile(), m_server->url(u"/projects.json"_s));
+        m_registry = std::make_unique<launcher::RegistryManager>();
         m_layout = std::make_unique<launcher::LibraryLayout>(m_paths->libraryDir(), m_paths->tempDir());
         m_installed = std::make_unique<launcher::InstalledProjects>(m_paths->stateFile());
         m_installed->load();

@@ -243,11 +243,16 @@ std::optional<Project> parseEntry(const QJsonValue& value, QString* error)
     project.tagPrefix = reader.optionalIdentifier("tag_prefix"_L1, RegistryParser::isValidTagPrefix,
         u"1 to 32 letters, digits, . _ - and starting with a letter"_s);
     project.assetPattern = reader.identifier("asset_pattern"_L1, RegistryParser::isValidAssetPattern,
-        u"a ZIP file name without a path; * is the only wildcard"_s);
+        u"a ZIP or EXE file name without a path; * is the only wildcard"_s);
     project.executable = reader.identifier("executable"_L1, RegistryParser::isValidExecutablePath,
         u"a relative path with / separators ending in .exe"_s);
     project.installDirectory = reader.identifier("install_directory"_L1,
         RegistryParser::isValidInstallDirectory, u"a single, Windows-safe folder name"_s);
+
+    // A single program has no folders inside: "executable" is the name it is installed under.
+    if (reader.ok() && RegistryParser::isSingleFileAsset(project.assetPattern)
+        && project.executable.contains(u'/'))
+        reader.fail(u"\"executable\" must be a plain file name when the release file is a single .exe"_s);
 
     if (!reader.ok()) {
         *error = reader.error();
@@ -304,8 +309,13 @@ bool isValidInstallDirectory(const QString& directory)
 
 bool isValidAssetPattern(const QString& pattern)
 {
-    return pattern.endsWith(".zip"_L1, Qt::CaseInsensitive)
-        && matchesWhole(u"[A-Za-z0-9._*+()-]{1,128}"_s, pattern);
+    const bool known = pattern.endsWith(".zip"_L1, Qt::CaseInsensitive) || isSingleFileAsset(pattern);
+    return known && matchesWhole(u"[A-Za-z0-9._*+()-]{1,128}"_s, pattern);
+}
+
+bool isSingleFileAsset(const QString& pattern)
+{
+    return pattern.endsWith(".exe"_L1, Qt::CaseInsensitive);
 }
 
 bool isValidTagPrefix(const QString& prefix)

@@ -7,6 +7,7 @@
 
 #include "TestHttpServer.h"
 #include "github/GitHubClient.h"
+#include "github/RegistryManager.h"
 #include "github/ReleaseManager.h"
 #include "github/ReleaseParser.h"
 
@@ -17,6 +18,8 @@
 #include <QPair>
 #include <QTest>
 #include <QTimer>
+
+#include <algorithm>
 
 using namespace Qt::StringLiterals;
 using launcher::FetchOptions;
@@ -775,7 +778,7 @@ void ReleaseTests::invalidProjectsAreRejectedWithoutARequest_data()
     QTest::newRow("repository with slash") << u"repository"_s << u"a/../b"_s;
     QTest::newRow("repository with git suffix") << u"repository"_s << u"Demo.git"_s;
     QTest::newRow("id with capital") << u"id"_s << u"Demo"_s;
-    QTest::newRow("pattern is not a zip") << u"assetPattern"_s << u"Demo.exe"_s;
+    QTest::newRow("pattern is not a zip or exe") << u"assetPattern"_s << u"Demo.msi"_s;
     QTest::newRow("pattern with path") << u"assetPattern"_s << u"../Demo.zip"_s;
     QTest::newRow("tag prefix with slash") << u"tagPrefix"_s << u"a/b"_s;
     QTest::newRow("tag prefix starting with a digit") << u"tagPrefix"_s << u"1v"_s;
@@ -946,6 +949,23 @@ void ReleaseTests::liveGitHub()
             << outcome.selection.asset.size << "bytes, digest"
             << (outcome.selection.asset.sha256.isEmpty() ? "none" : "present") << "- request budget"
             << client.rateLimit().remaining << "of" << client.rateLimit().limit;
+
+    // The first project of the built-in list: tag prefix and a release that is a single program.
+    launcher::RegistryManager registry;
+    QVERIFY(registry.loadBuiltIn());
+    const auto overlay = std::find_if(registry.projects().cbegin(), registry.projects().cend(),
+        [](const Project& p) { return p.id == u"kers-overlay"_s; });
+    QVERIFY(overlay != registry.projects().cend());
+
+    const Outcome real = fetch(manager, *overlay);
+    QVERIFY2(real.ready,
+        qPrintable(u"problem %1, HTTP %2"_s.arg(static_cast<int>(real.problem)).arg(real.httpStatus)));
+    QVERIFY(real.selection.release.tag.startsWith(overlay->tagPrefix));
+    QVERIFY(real.selection.release.version > launcher::SemVer::parse(u"0.3.0"_s).value());
+    QVERIFY(launcher::RegistryParser::isSingleFileAsset(real.selection.asset.name));
+    QVERIFY(!real.selection.asset.sha256.isEmpty()); // GitHub's digest: the file can be verified
+    qInfo() << "KERS Overlay:" << real.selection.release.tag << real.selection.asset.name
+            << real.selection.asset.size << "bytes, digest present";
 }
 
 QTEST_GUILESS_MAIN(ReleaseTests)

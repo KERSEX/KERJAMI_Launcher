@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "registry_name": "KERJAMI Projektliste",
+  "projects": [
+    {
+      "id": "kers-overlay",
+      "name": "KERS Overlay",
+      "description": "Overlay für F1-Spiele.",
+      "owner": "KERSEX",
+      "repository": "KERS_Overlay",
+      "category": "Overlays",
+      "tags": ["F1", "Overlay"],
+      "enabled": true,
+      "featured": true,
+      "release_channel": "stable",
+      "tag_prefix": "KERS_SubsystemsV",
+      "asset_pattern": "KERS_Subsystems.exe",
+      "executable": "KERS_Subsystems.exe",
+      "install_directory": "KERS_Overlay"
+    }
+  ]
+}

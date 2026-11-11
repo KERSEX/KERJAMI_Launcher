@@ -45,7 +45,6 @@ public:
     // The new value stays active in memory either way.
     bool setTheme(ThemeId theme);
     bool setStartPage(StartPage page);
-    bool setRegistryAutoCheck(bool enabled);
     bool setLauncherUpdateAutoCheck(bool enabled);
 
     /// The value is clamped to the supported range.

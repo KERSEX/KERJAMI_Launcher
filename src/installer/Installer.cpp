@@ -28,6 +28,7 @@ namespace {
 /// written for long paths, which is most of them, fail beyond it.
 constexpr int kMaxWindowsPath = 259;
 constexpr int kMinPathBudget = 16;
+constexpr qint64 kMinProgramSize = 64; // the DOS header of a Windows program alone is 64 bytes
 
 qint64 defaultAvailableSpace(const QString& folder)
 {
@@ -137,9 +138,11 @@ InstallResult Installer::run(Job& job)
     };
 
     // --- 1. the request itself ---------------------------------------------
+    const bool singleFile = RegistryParser::isSingleFileAsset(project.assetPattern);
     if (!RegistryParser::isValidProjectId(project.id)
         || !RegistryParser::isValidInstallDirectory(project.installDirectory)
-        || !RegistryParser::isValidExecutablePath(project.executable))
+        || !RegistryParser::isValidExecutablePath(project.executable)
+        || (singleFile && project.executable.contains(u'/')))
         return failure(InstallError::InvalidProject, u"project id, folder or start file are not valid"_s);
 
     const std::optional<SemVer> version = SemVer::parse(request.version);
@@ -190,21 +193,38 @@ InstallResult Installer::run(Job& job)
             u"only %1 characters are left for paths inside the project"_s.arg(budget));
     limits.maxPathLength = std::min(limits.maxPathLength, budget);
 
-    ZipArchive::OpenResult opened = ZipArchive::open(request.archivePath);
-    if (!opened.ok())
-        return failure(InstallError::ArchiveUnreadable, opened.detail);
-    ZipArchive& archive = *opened.archive;
+    // A ZIP is opened and every entry checked. A single program has no entries: it must be
+    // a Windows program (the "MZ" signature), and it is installed under one file name.
+    std::unique_ptr<ZipArchive> archivePointer;
+    ArchiveValidator::ValidationResult validation;
+    qint64 payloadSize = 0;
+    if (singleFile) {
+        QFile program(request.archivePath);
+        char signature[2] = {};
+        payloadSize = program.size();
+        if (!program.open(QIODevice::ReadOnly) || payloadSize < kMinProgramSize
+            || program.read(signature, 2) != 2 || signature[0] != 'M' || signature[1] != 'Z')
+            return failure(InstallError::NotAProgram, u"the file is not a Windows program"_s);
+        if (int(staging.size() + 1 + project.executable.size()) > kMaxWindowsPath
+            || int(current.size() + 1 + project.executable.size()) > kMaxWindowsPath)
+            return failure(InstallError::PathTooLong, u"the program's path would be too long"_s);
+    } else {
+        ZipArchive::OpenResult opened = ZipArchive::open(request.archivePath);
+        if (!opened.ok())
+            return failure(InstallError::ArchiveUnreadable, opened.detail);
+        archivePointer = std::move(opened.archive);
 
-    const ArchiveValidator::ValidationResult validation =
-        ArchiveValidator::validate(archive, limits, project.executable);
-    if (!validation.ok()) {
-        InstallResult result = failure(InstallError::ArchiveRejected, validation.detail);
-        result.validationProblem = validation.problem;
-        return result;
+        validation = ArchiveValidator::validate(*archivePointer, limits, project.executable);
+        if (!validation.ok()) {
+            InstallResult result = failure(InstallError::ArchiveRejected, validation.detail);
+            result.validationProblem = validation.problem;
+            return result;
+        }
+        payloadSize = validation.totalSize;
     }
 
     // --- 4. extraction into staging ------------------------------------------
-    const qint64 needed = validation.totalSize + kSpaceReserve;
+    const qint64 needed = payloadSize + kSpaceReserve;
     if (m_availableSpace) {
         const qint64 available = m_availableSpace(m_layout.tempDir());
         if (available >= 0 && available < needed)
@@ -224,13 +244,22 @@ InstallResult Installer::run(Job& job)
         FileOps::removeTree(staging, &ignored);
     };
 
-    const ArchiveExtractor::Result extracted = ArchiveExtractor::extract(archive, validation, staging,
-        &job.cancel, [&](qint64 done, qint64 total) { report(Stage::Extracting, done, total); });
-    if (!extracted.ok()) {
-        discardStaging();
-        if (extracted.status == ArchiveExtractor::Status::Cancelled)
-            return failure(InstallError::Cancelled, {});
-        return failure(InstallError::ExtractionFailed, extracted.detail);
+    if (singleFile) {
+        const QString target = staging + u'/' + project.executable;
+        if (!QFile::copy(request.archivePath, target) || QFileInfo(target).size() != payloadSize) {
+            discardStaging();
+            return failure(InstallError::ExtractionFailed, u"the program file cannot be copied"_s);
+        }
+        report(Stage::Extracting, payloadSize, payloadSize);
+    } else {
+        const ArchiveExtractor::Result extracted = ArchiveExtractor::extract(*archivePointer, validation,
+            staging, &job.cancel, [&](qint64 done, qint64 total) { report(Stage::Extracting, done, total); });
+        if (!extracted.ok()) {
+            discardStaging();
+            if (extracted.status == ArchiveExtractor::Status::Cancelled)
+                return failure(InstallError::Cancelled, {});
+            return failure(InstallError::ExtractionFailed, extracted.detail);
+        }
     }
 
     const QFileInfo startFile(staging + u'/' + project.executable);

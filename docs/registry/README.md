@@ -1,12 +1,21 @@
-# KERJAMI Project Registry
+# KERJAMI Projektliste (Registry)
 
-Diese Registry ist die einzige Quelle für die Projekte, die der
+Diese Liste ist die einzige Quelle für die Projekte, die der
 [KERJAMI Launcher](https://github.com/KERSEX/KERJAMI_Launcher) anzeigt. Ein Projekt, das hier
 nicht steht, kann im Launcher weder gefunden noch installiert werden.
 
-Der Launcher lädt die Datei [`projects.json`](projects.json) vom Branch `main`. Die Adresse ist im
-Launcher fest eingebaut. Das Repository muss öffentlich bleiben, weil der Launcher ohne Anmeldung
-arbeitet.
+Die Liste ist Teil des Launchers: Die Datei
+[`resources/registry/projects.json`](../../resources/registry/projects.json) wird beim Bauen in die EXE
+eingebaut. Es gibt keinen Abruf und kein eigenes Repository (`docs/03-entscheidungen.md`, D-43). Ein neuer
+oder geänderter Eintrag erreicht die Nutzer mit dem nächsten Release des Launchers, das sich per
+Selbstupdate installiert.
+
+## So kommt ein Eintrag in den Launcher
+
+1. Den Eintrag in `resources/registry/projects.json` ergänzen (Felder unten).
+2. `.\scripts\build.ps1 -Test` ausführen. Der Test `RegistryManagerTests` schlägt fehl, wenn ein Eintrag einen
+   Fehler hat, denn ein solcher Eintrag würde im Programm still verworfen.
+3. Ein Release des Launchers veröffentlichen.
 
 ## Ein Projekt eintragen
 
@@ -48,8 +57,8 @@ will, tut das im Launcher selbst.
 | `featured` | nein | `true` hebt das Projekt im Dashboard hervor. Standard `false`. |
 | `release_channel` | nein | Version 1 kennt nur `stable`. Das ist auch der Standard. Pre-Releases werden nicht berücksichtigt. |
 | `tag_prefix` | nein | Text, mit dem die Release-Tags des Projekts vor der Versionsnummer beginnen, zum Beispiel `KERS_SubsystemsV` für das Tag `KERS_SubsystemsV0.3.1`. Der Launcher schneidet ihn ab und liest den Rest als Version. Er besteht aus 1 bis 32 Buchstaben, Ziffern, `.`, `_` oder `-` und beginnt mit einem Buchstaben, ohne `/`. Groß- und Kleinschreibung zählt. Ohne dieses Feld ist das ganze Tag die Version (`1.2.0` oder `v1.2.0`). Mit dem Feld zählen nur Tags, die so beginnen. |
-| `asset_pattern` | ja | Dateiname des ZIP-Archivs im GitHub-Release. Ein `*` steht für beliebige Zeichen, zum Beispiel `Projekt-*-Windows-x64.zip`. Das Muster muss auf `.zip` enden und darf keinen Pfad enthalten. |
-| `executable` | ja | Pfad der Start-Datei innerhalb des Archivs, mit `/` als Trenner und auf `.exe` endend. Absolute Pfade und `..` sind nicht erlaubt. |
+| `asset_pattern` | ja | Dateiname der Release-Datei auf GitHub. Ein `*` steht für beliebige Zeichen, zum Beispiel `Projekt-*-Windows-x64.zip`. Das Muster endet auf `.zip` (ein Archiv mit dem Programm und seinen Dateien) oder auf `.exe` (das Programm selbst, als einzelne Datei) und darf keinen Pfad enthalten. Genau eine Datei des neuesten Releases muss passen. |
+| `executable` | ja | Bei einem ZIP: Pfad der Start-Datei innerhalb des Archivs, mit `/` als Trenner und auf `.exe` endend, ohne absolute Pfade und `..`. Bei einer einzelnen `.exe`: der Dateiname, unter dem das Programm installiert wird, ohne Pfad. |
 | `install_directory` | ja | Ordnername unterhalb der Projektbibliothek des Launchers. Buchstaben, Ziffern, `_`, `-` und `.`, höchstens 64 Zeichen. Jedes Projekt braucht einen eigenen Ordner. |
 
 ## Was der Launcher prüft
@@ -68,9 +77,9 @@ ein Eintrag unter anderem bei:
 - einem `tag_prefix`, der vorhanden, aber leer oder ungültig ist (fehlt das Feld, ist das in Ordnung),
 - ungültigen Zeichen in `owner` oder `repository`.
 
-Ist die ganze Datei kein gültiges JSON oder hat sie eine unbekannte `schema_version`, behält der
-Launcher die zuletzt geladene gültige Fassung. Prüft den Eintrag deshalb, bevor ihr ihn
-veröffentlicht, zum Beispiel mit einem JSON-Validator.
+Ein verworfener Eintrag erscheint nicht in der Bibliothek, und im Log (`launcher.registry`) steht der Grund.
+Ist die ganze Datei kein gültiges JSON oder hat sie eine unbekannte `schema_version`, ist die Liste leer. Beides
+fängt der Test `RegistryManagerTests` ab, bevor ein Release entsteht.
 
 ## Die Veröffentlichung eines Projekts
 

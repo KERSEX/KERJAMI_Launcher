@@ -101,7 +101,6 @@ void SettingsTests::firstLoadWritesDefaults()
     // New installations start with manual, conservative defaults.
     QCOMPARE(settings.settings().updateCheckIntervalMinutes, 60);
     QCOMPARE(settings.settings().startPage, StartPage::Dashboard);
-    QVERIFY(settings.settings().registryAutoCheck);
     QVERIFY(settings.settings().launcherUpdateAutoCheck);
 
     const QJsonObject stored = readJson(settingsPath());
@@ -123,17 +122,15 @@ void SettingsTests::changesArePersistedImmediately()
     QSignalSpy changed(&settings, &SettingsManager::settingsChanged);
 
     QVERIFY(settings.setStartPage(StartPage::Library));
-    QVERIFY(settings.setRegistryAutoCheck(false));
     QVERIFY(settings.setLauncherUpdateAutoCheck(false));
     QVERIFY(settings.setUpdateCheckIntervalMinutes(360));
-    QCOMPARE(changed.count(), 4);
+    QCOMPARE(changed.count(), 3);
 
     // A second manager stands in for the next start of the launcher. It is
     // created while the first one still exists: nothing is deferred to shutdown.
     SettingsManager restarted(settingsPath());
     QCOMPARE(restarted.load(), SettingsManager::LoadResult::Loaded);
     QCOMPARE(restarted.settings().startPage, StartPage::Library);
-    QVERIFY(!restarted.settings().registryAutoCheck);
     QVERIFY(!restarted.settings().launcherUpdateAutoCheck);
     QCOMPARE(restarted.settings().updateCheckIntervalMinutes, 360);
 }
@@ -146,7 +143,7 @@ void SettingsTests::unchangedValueDoesNotWriteOrNotify()
     QSignalSpy changed(&settings, &SettingsManager::settingsChanged);
 
     QTest::qWait(30); // make a rewrite visible in the timestamp
-    QVERIFY(settings.setRegistryAutoCheck(true));
+    QVERIFY(settings.setLauncherUpdateAutoCheck(true));
     QVERIFY(settings.setUpdateCheckIntervalMinutes(60));
 
     QCOMPARE(changed.count(), 0);
@@ -214,7 +211,6 @@ void SettingsTests::wrongValueTypesFallBackToDefaults()
     QVERIFY(writeFile(settingsPath(), R"({
         "schema_version": 1,
         "startup": {"start_page": 7},
-        "registry": {"auto_check": "yes"},
         "updates": {"check_interval_minutes": "often", "launcher_auto_check": false}
     })"));
 
@@ -223,7 +219,6 @@ void SettingsTests::wrongValueTypesFallBackToDefaults()
 
     // Each bad entry falls back on its own; the valid one is kept.
     QCOMPARE(settings.settings().startPage, StartPage::Dashboard);
-    QVERIFY(settings.settings().registryAutoCheck);
     QCOMPARE(settings.settings().updateCheckIntervalMinutes, 60);
     QVERIFY(!settings.settings().launcherUpdateAutoCheck);
 }
@@ -306,12 +301,12 @@ void SettingsTests::saveFailureIsReported()
     QCOMPARE(settings.load(), SettingsManager::LoadResult::CreatedDefaults);
     QCOMPARE(failed.count(), 1);
 
-    QVERIFY(!settings.setRegistryAutoCheck(false));
+    QVERIFY(!settings.setLauncherUpdateAutoCheck(false));
     QCOMPARE(failed.count(), 2);
     QVERIFY(!failed.at(1).at(0).toString().isEmpty());
 
     // The choice still applies for the running session.
-    QVERIFY(!settings.settings().registryAutoCheck);
+    QVERIFY(!settings.settings().launcherUpdateAutoCheck);
 }
 
 void SettingsTests::noTemporaryFilesAreLeftBehind()

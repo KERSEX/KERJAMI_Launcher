@@ -23,9 +23,6 @@ constexpr auto kTheme = "theme"_L1;
 constexpr auto kStartup = "startup"_L1;
 constexpr auto kStartPage = "start_page"_L1;
 
-constexpr auto kRegistry = "registry"_L1;
-constexpr auto kRegistryAutoCheck = "auto_check"_L1;
-
 constexpr auto kUpdates = "updates"_L1;
 constexpr auto kCheckInterval = "check_interval_minutes"_L1;
 constexpr auto kLauncherAutoCheck = "launcher_auto_check"_L1;
@@ -88,9 +85,6 @@ LauncherSettings settingsFromJson(const QJsonObject& root)
     const QJsonObject startup = root.value(kStartup).toObject();
     settings.startPage = startPageFromString(startup.value(kStartPage).toString());
 
-    const QJsonObject registry = root.value(kRegistry).toObject();
-    settings.registryAutoCheck = readBool(registry, kRegistryAutoCheck, settings.registryAutoCheck);
-
     const QJsonObject updates = root.value(kUpdates).toObject();
     settings.launcherUpdateAutoCheck =
         readBool(updates, kLauncherAutoCheck, settings.launcherUpdateAutoCheck);
@@ -116,7 +110,6 @@ void writeSettings(QJsonObject& root, const LauncherSettings& settings)
     root.insert(kVersionKey, SettingsManager::kSchemaVersion);
     setInSection(root, kAppearance, kTheme, themeToString(settings.theme));
     setInSection(root, kStartup, kStartPage, startPageToString(settings.startPage));
-    setInSection(root, kRegistry, kRegistryAutoCheck, settings.registryAutoCheck);
     setInSection(root, kUpdates, kCheckInterval, settings.updateCheckIntervalMinutes);
     setInSection(root, kUpdates, kLauncherAutoCheck, settings.launcherUpdateAutoCheck);
 }
@@ -265,11 +258,6 @@ bool SettingsManager::setTheme(ThemeId theme)
 bool SettingsManager::setStartPage(StartPage page)
 {
     return assign(&LauncherSettings::startPage, page);
-}
-
-bool SettingsManager::setRegistryAutoCheck(bool enabled)
-{
-    return assign(&LauncherSettings::registryAutoCheck, enabled);
 }
 
 bool SettingsManager::setLauncherUpdateAutoCheck(bool enabled)

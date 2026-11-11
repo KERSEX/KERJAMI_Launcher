@@ -23,9 +23,6 @@ struct LauncherSettings {
     ThemeId theme = ThemeId::Dark;
     StartPage startPage = StartPage::Dashboard;
 
-    /// Reload the project registry on start and in the check interval.
-    bool registryAutoCheck = true;
-
     /// Look for new launcher versions automatically. Installing always needs confirmation.
     bool launcherUpdateAutoCheck = true;
 

@@ -127,6 +127,8 @@ QString installText(const OperationFailure& failure)
         return tr("Die heruntergeladene Datei ist kein lesbares ZIP-Archiv.");
     case InstallError::ArchiveRejected:
         return archiveRejectedText(failure.subcode) + u' ' + tr("Es wurde nichts installiert.");
+    case InstallError::NotAProgram:
+        return tr("Die heruntergeladene Datei ist kein Windows-Programm. Es wurde nichts installiert.");
     case InstallError::InsufficientSpace:
         return tr("Nicht genug freier Speicherplatz zum Entpacken.");
     case InstallError::PathTooLong:

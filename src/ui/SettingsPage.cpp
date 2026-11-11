@@ -81,18 +81,6 @@ QWidget* SettingsPage::createUpdatesCard()
     auto* card = new Card(this);
     const LauncherSettings& current = m_settings.settings();
 
-    const QString registryTitle = tr("Registry automatisch prüfen");
-    auto* registryToggle = new ToggleSwitch(card);
-    registryToggle->setObjectName("RegistryAutoCheck");
-    registryToggle->setAccessibleName(registryTitle);
-    registryToggle->setChecked(current.registryAutoCheck);
-    connect(registryToggle, &QAbstractButton::toggled, this,
-        [this](bool enabled) { m_settings.setRegistryAutoCheck(enabled); });
-    card->body()->addWidget(createRow(
-        registryTitle, tr("Lädt die Projektliste beim Start und danach im Prüfintervall."), registryToggle));
-
-    card->body()->addWidget(createDivider(card));
-
     const QString intervalTitle = tr("Prüfintervall");
     auto* intervalBox = new ComboBox(card);
     intervalBox->setObjectName("CheckInterval");

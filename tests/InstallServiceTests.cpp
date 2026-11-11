@@ -247,6 +247,45 @@ private slots:
         QVERIFY(changes.size() >= 4); // asking, downloading, verifying/extracting, done
     }
 
+    void installsAReleaseThatIsASingleProgram()
+    {
+        // As KERS Overlay publishes: the release holds the .exe itself, and the tag has a prefix.
+        m_project.assetPattern = u"KERS_Subsystems.exe"_s;
+        m_project.executable = u"Overlay.exe"_s; // installed under this name, whatever the asset is called
+        m_project.tagPrefix = u"KERS_SubsystemsV"_s;
+
+        const QByteArray program = QByteArray("MZ") + QByteArray(200, 'x') + "OVERLAY-0.3.1";
+        m_offer = {};
+        m_offer.tag = u"KERS_SubsystemsV0.3.1"_s;
+        m_offer.assetName = u"KERS_Subsystems.exe"_s;
+        m_offer.archive = program; // the file the server sends
+        m_offer.digest = sha256(program);
+
+        QVERIFY(installAndWait());
+        QCOMPARE(readFile(library(u"Tool/current/Overlay.exe"_s)), program);
+        QCOMPARE(QDir(library(u"Tool/current"_s)).entryList(QDir::Files), QStringList {u"Overlay.exe"_s});
+        const auto record = m_installed->get(u"tool"_s);
+        QVERIFY(record.has_value());
+        QCOMPARE(record->version, u"0.3.1"_s);
+        QCOMPARE(record->tag, u"KERS_SubsystemsV0.3.1"_s);
+        QCOMPARE(record->executable, u"Overlay.exe"_s);
+
+        // The downloaded file is gone and nothing is left in temp/.
+        QVERIFY(!QFileInfo::exists(m_paths->downloadsDir() + u"/tool/KERS_Subsystems.exe"_s));
+        QVERIFY(QDir(m_paths->tempDir()).isEmpty());
+
+        // A file that arrives with the right hash but is not a program is refused.
+        const QByteArray notAProgram = QByteArray("not a program, ") + QByteArray(200, 'y');
+        m_offer.tag = u"KERS_SubsystemsV0.3.2"_s;
+        m_offer.archive = notAProgram;
+        m_offer.digest = sha256(notAProgram);
+        QVERIFY(!installAndWait());
+        QCOMPARE(readFile(library(u"Tool/current/Overlay.exe"_s)), program); // 0.3.1 is still there
+        QCOMPARE(m_installed->get(u"tool"_s)->version, u"0.3.1"_s);
+        QCOMPARE(static_cast<launcher::InstallError>(m_service->lastFailure(u"tool"_s).code),
+            launcher::InstallError::NotAProgram);
+    }
+
     void reportsEachStageOnTheWay()
     {
         QList<ProjectStatus::Stage> seen;

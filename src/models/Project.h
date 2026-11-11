@@ -28,8 +28,10 @@ struct Project {
     ReleaseChannel releaseChannel = ReleaseChannel::Stable;
     QString tagPrefix; ///< Text before the version in a release tag, e.g. "KERS_SubsystemsV". Empty: the tag
                        ///< is the version, with an optional "v".
-    QString assetPattern;     ///< File name of the ZIP release asset; "*" matches any characters.
-    QString executable;       ///< Path of the start file inside the archive, with "/" separators.
+    QString
+        assetPattern; ///< File name of the release asset, a ZIP or a single .exe; "*" matches any characters.
+    QString executable; ///< Path of the start file inside the archive, with "/" separators. For a single
+                        ///< .exe asset: the file name it is installed under.
     QString installDirectory; ///< Folder name below the project library.
 
     bool operator==(const Project&) const = default;
