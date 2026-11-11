@@ -11,6 +11,8 @@
 //              starts the copy, which also waits for the stop file next to the parent
 //   started.log  every start appends a line with the size of the program's own file, so a test
 //              can tell which version of the program was started
+//   cwd.log    the working folder the program was started in (UTF-8), so a test can see that a project
+//              is started in its own folder
 //   mainexits  together with "spawn": the parent ends right after starting the child,
 //              the child keeps running (how a launcher stub starts the real program)
 
@@ -83,6 +85,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         if (GetFileAttributesExW(self, GetFileExInfoStandard, &data)) {
             std::ofstream log((home + L"\\started.log").c_str(), std::ios::app);
             log << data.nFileSizeLow << "\n";
+        }
+        wchar_t folder[MAX_PATH * 4];
+        const DWORD length =
+            GetCurrentDirectoryW(static_cast<DWORD>(sizeof(folder) / sizeof(folder[0])), folder);
+        if (length > 0) {
+            char utf8[MAX_PATH * 8];
+            const int bytes = WideCharToMultiByte(CP_UTF8, 0, folder, static_cast<int>(length), utf8,
+                static_cast<int>(sizeof(utf8)), nullptr, nullptr);
+            std::ofstream cwd((home + L"\\cwd.log").c_str(), std::ios::binary | std::ios::trunc);
+            cwd.write(utf8, bytes);
         }
     }
 

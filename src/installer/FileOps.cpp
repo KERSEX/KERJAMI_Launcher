@@ -70,6 +70,51 @@ bool removeTree(const QString& path, QString* error)
     return removeEmptyDirectory(path) || fail(path);
 }
 
+bool copyTree(const QString& from, const QString& to, QString* error)
+{
+    const auto fail = [error](const QString& what) {
+        if (error)
+            *error = what;
+        return false;
+    };
+    if (isLink(from))
+        return true; // a link is not data of the project, and not ours to follow
+
+    const QFileInfo source(from);
+    const QFileInfo target(to);
+    if (source.isDir()) {
+        if (target.exists() || target.isSymLink()) {
+            if (!target.isDir() || isLink(to)) {
+                QString removeError;
+                if (!removeTree(to, &removeError))
+                    return fail(removeError);
+            }
+        }
+        if (!QDir().mkpath(to))
+            return fail(u"the folder %1 cannot be created"_s.arg(QDir::toNativeSeparators(to)));
+        const QFileInfoList entries =
+            QDir(from).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+        for (const QFileInfo& entry : entries) {
+            if (!copyTree(entry.filePath(), to + u'/' + entry.fileName(), error))
+                return false;
+        }
+        return true;
+    }
+
+    if (target.exists() || target.isSymLink()) {
+        QString removeError;
+        const bool gone = target.isDir() || isLink(to) ? removeTree(to, &removeError) : removeFile(to);
+        if (!gone)
+            return fail(removeError.isEmpty() ? u"%1 cannot be replaced"_s.arg(QDir::toNativeSeparators(to))
+                                              : removeError);
+    }
+    if (!QDir().mkpath(target.absolutePath()))
+        return fail(u"the folder of %1 cannot be created"_s.arg(QDir::toNativeSeparators(to)));
+    if (!QFile::copy(from, to))
+        return fail(u"%1 cannot be copied"_s.arg(QDir::toNativeSeparators(from)));
+    return true;
+}
+
 bool renameWithRetry(const QString& from, const QString& to, QString* error)
 {
     constexpr int kAttempts = 5;

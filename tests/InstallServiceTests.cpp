@@ -15,19 +15,24 @@
 #include "installer/Installer.h"
 #include "installer/LibraryLayout.h"
 #include "installer/Uninstaller.h"
+#include "process/ProcessManager.h"
 #include "security/HashVerifier.h"
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <windows.h>
 
 #include <memory>
 
@@ -649,6 +654,121 @@ private slots:
         QVERIFY(!m_service->lastFailure(u"tool"_s).isFailure());
     }
 
+    /// Starts the installed program the way the launcher does, watches it for a few seconds, closes it
+    /// (politely first, by force if it does not go) and reports what it saw. Part of the live test.
+    void liveStartAndStop(const PathManager& paths, const launcher::LibraryLayout& layout,
+        InstalledProjects& installed, const Project& project, const launcher::InstalledProject& record)
+    {
+        Q_UNUSED(paths);
+        launcher::ProcessManager processes(layout, installed);
+        processes.setPolling(false);
+
+        const QString exe = QDir::toNativeSeparators(layout.executablePath(record));
+        const launcher::StartResult started = processes.start(project.id);
+        QVERIFY2(started.ok(), qPrintable(started.detail));
+        QVERIFY(started.processId > 0);
+        QVERIFY(installed.get(project.id)->lastStartedAt.isValid()); // the launcher noted the start
+        QVERIFY(processes.isRunningNow(project.id));
+
+        // It is the installed file that runs: the image of the process is the file in current/.
+        {
+            HANDLE process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(started.processId));
+            QVERIFY(process != nullptr);
+            wchar_t image[4096];
+            DWORD size = static_cast<DWORD>(sizeof(image) / sizeof(image[0]));
+            const bool got = QueryFullProcessImageNameW(process, 0, image, &size);
+            CloseHandle(process);
+            QVERIFY(got);
+            QCOMPARE(QDir::cleanPath(QString::fromWCharArray(image, static_cast<qsizetype>(size))).toLower(),
+                QDir::cleanPath(exe).toLower());
+        }
+
+        // Ten seconds: is it still there, does it show a window, did it end by itself?
+        struct WindowCount {
+            DWORD pid;
+            int total = 0;
+            int visible = 0;
+        } windows {static_cast<DWORD>(started.processId)};
+        const auto countWindows = [&windows] {
+            windows.total = windows.visible = 0;
+            EnumWindows(
+                [](HWND window, LPARAM parameter) -> BOOL {
+                    auto* counts = reinterpret_cast<WindowCount*>(parameter);
+                    DWORD owner = 0;
+                    GetWindowThreadProcessId(window, &owner);
+                    if (owner == counts->pid) {
+                        ++counts->total;
+                        if (IsWindowVisible(window))
+                            ++counts->visible;
+                    }
+                    return TRUE;
+                },
+                reinterpret_cast<LPARAM>(&windows));
+        };
+
+        int secondsAlive = 0;
+        int mostVisible = 0;
+        for (int i = 0; i < 20; ++i) {
+            QTest::qWait(500);
+            processes.refresh();
+            countWindows();
+            mostVisible = qMax(mostVisible, windows.visible);
+            if (!processes.isRunningNow(project.id))
+                break;
+            secondsAlive = (i + 1) / 2;
+        }
+        const bool aliveAfterWatching = processes.isRunningNow(project.id);
+        qInfo() << "KERS Overlay: process" << started.processId
+                << (aliveAfterWatching ? "still running" : "ended") << "after" << secondsAlive << "s, at most"
+                << mostVisible << "visible window(s)";
+        if (const std::optional<launcher::ProcessExit> exit = processes.lastExit(project.id))
+            qInfo() << "KERS Overlay ended by itself with exit code" << exit->exitCode << "after"
+                    << exit->runSeconds << "s";
+
+        // What the program wrote next to itself.
+        const QStringList written = QDir(layout.currentDir(project.installDirectory))
+                                        .entryList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::Name);
+        qInfo() << "Files in current/ now:" << written;
+        // One level deeper, with sizes: what the program keeps next to itself (settings? caches?).
+        for (const QString& name : written) {
+            const QFileInfo entry(layout.currentDir(project.installDirectory) + u'/' + name);
+            if (!entry.isDir())
+                continue;
+            QStringList inside;
+            QDirIterator it(entry.filePath(), QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext() && inside.size() < 30) {
+                it.next();
+                inside.append(entry.dir().relativeFilePath(it.filePath()) + u" ("_s
+                    + QString::number(it.fileInfo().size()) + u" bytes)"_s);
+            }
+            qInfo() << name + u"/:"_s << inside;
+        }
+
+        // Closing: ask the windows to close, then wait; whatever is still there is ended with its children.
+        if (aliveAfterWatching) {
+            EnumWindows(
+                [](HWND window, LPARAM parameter) -> BOOL {
+                    DWORD owner = 0;
+                    GetWindowThreadProcessId(window, &owner);
+                    if (owner == static_cast<DWORD>(parameter))
+                        PostMessageW(window, WM_CLOSE, 0, 0);
+                    return TRUE;
+                },
+                static_cast<LPARAM>(started.processId));
+            for (int i = 0; i < 20 && processes.isRunningNow(project.id); ++i)
+                QTest::qWait(500);
+            if (processes.isRunningNow(project.id)) {
+                qInfo() << "KERS Overlay did not close when asked; it is ended by force";
+                QProcess::execute(
+                    u"taskkill"_s, {u"/PID"_s, QString::number(started.processId), u"/T"_s, u"/F"_s});
+            }
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!processes.isRunningNow(project.id), 20000);
+        // The files of the program are free again, so that the uninstallation can delete them.
+        QTest::qWait(500);
+    }
+
     /// The real thing, once: the first project of the built-in list is installed from GitHub and removed
     /// again. It downloads the release file (about 56 MB), so it runs only when asked for with its own
     /// switch, apart from LAUNCHER_LIVE_TESTS, which reads metadata only.
@@ -739,6 +859,10 @@ private slots:
         QVERIFY2(QDir(paths.tempDir()).isEmpty(), qPrintable(QDir(paths.tempDir()).entryList().join(u',')));
         qInfo() << "Installed" << record->version << "(" << QFileInfo(exe).size() << "bytes ) in"
                 << clock.elapsed() / 1000.0 << "seconds";
+
+        // Started once, if that is asked for as well: it runs the downloaded program for a few seconds.
+        if (qEnvironmentVariableIsSet("LAUNCHER_LIVE_START_TESTS"))
+            liveStartAndStop(paths, layout, installed, project, *record);
 
         // And away again.
         const launcher::UninstallResult removed = service.uninstall(project.id);

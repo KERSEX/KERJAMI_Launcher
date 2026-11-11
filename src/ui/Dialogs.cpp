@@ -105,7 +105,11 @@ bool confirmUpdate(QWidget* parent, const Project& project, const UpdateInfo& up
         tr("Installiert ist Version %1. Die neue Version wird heruntergeladen, geprüft und installiert. "
            "Läuft das Projekt, wird die Installation vorgemerkt und beginnt, sobald es beendet ist. "
            "Die bisherige Version bleibt als Sicherung erhalten.")
-            .arg(update.installedVersion));
+            .arg(update.installedVersion)
+        + (project.keep.isEmpty() ? QString()
+                                  : u' '
+                    + tr("Deine Daten (%1) werden in die neue Version übernommen.")
+                        .arg(project.keep.join(QStringLiteral(", ")))));
     // The release notes are the changelog; they are shown on request.
     if (!update.notes.trimmed().isEmpty())
         box.setDetailedText(update.notes);
@@ -124,10 +128,17 @@ bool confirmUninstall(QWidget* parent, const Project& project)
 
     QMessageBox box(QMessageBox::Warning, tr("Deinstallieren"),
         tr("%1 wird deinstalliert.").arg(project.name), QMessageBox::NoButton, parent);
-    box.setInformativeText(
-        tr("Der Ordner des Projekts in der Bibliothek wird mit allen Dateien und allen "
-           "gesicherten früheren Versionen gelöscht. Das kann nicht rückgängig gemacht werden. "
-           "Andere Projekte und deine Einstellungen bleiben unberührt."));
+    // What the project keeps in its own folder (settings, profiles) goes too: the dialog says so,
+    // because "your settings stay untouched" would be read as covering the project's own data.
+    const QString ownData = project.keep.isEmpty() ? QString()
+                                                   : u' '
+            + tr("Auch die Daten des Projekts (%1) werden gelöscht.")
+                  .arg(project.keep.join(QStringLiteral(", ")));
+    box.setInformativeText(tr("Der Ordner des Projekts in der Bibliothek wird mit allen Dateien und allen "
+                              "gesicherten früheren Versionen gelöscht.")
+        + ownData + u' '
+        + tr("Das kann nicht rückgängig gemacht werden. "
+             "Andere Projekte und die Einstellungen des Launchers bleiben unberührt."));
     QPushButton* remove = box.addButton(tr("Deinstallieren"), QMessageBox::DestructiveRole);
     QPushButton* keep = box.addButton(tr("Abbrechen"), QMessageBox::RejectRole);
     box.setDefaultButton(keep);

@@ -32,6 +32,8 @@ struct Project {
         assetPattern; ///< File name of the release asset, a ZIP or a single .exe; "*" matches any characters.
     QString executable; ///< Path of the start file inside the archive, with "/" separators. For a single
                         ///< .exe asset: the file name it is installed under.
+    QStringList keep;   ///< Files and folders below the install folder that are the project's own data
+                        ///< (settings, say). An update carries them over into the new version (D-47).
     QString installDirectory; ///< Folder name below the project library.
 
     bool operator==(const Project&) const = default;

@@ -78,6 +78,8 @@ private slots:
             QVERIFY2(launcher::RegistryParser::isValidExecutablePath(project.executable), qPrintable(name));
             QVERIFY2(launcher::RegistryParser::isValidInstallDirectory(project.installDirectory),
                 qPrintable(name));
+            for (const QString& kept : project.keep)
+                QVERIFY2(launcher::RegistryParser::isValidKeepPath(kept), qPrintable(name + u": "_s + kept));
             if (!project.tagPrefix.isEmpty())
                 QVERIFY2(launcher::RegistryParser::isValidTagPrefix(project.tagPrefix), qPrintable(name));
             QVERIFY2(project.enabled, qPrintable(name)); // disabled entries are not listed at all

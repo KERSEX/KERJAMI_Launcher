@@ -75,6 +75,10 @@ private slots:
     void parsesAFullEntry();
     void optionalFieldsHaveDefaults();
     void aSingleProgramReleaseNeedsAFileNameAsExecutable();
+    void aProjectCanKeepItsOwnData();
+    void keptDataMustNotContainTheStartFile();
+    void keepPaths_data();
+    void keepPaths();
     void unknownFieldsAreIgnored();
     void displayTextIsTrimmed();
     void tagsAreDeduplicated();
@@ -185,6 +189,77 @@ void RegistryTests::aSingleProgramReleaseNeedsAFileNameAsExecutable()
     QCOMPARE(result.issues.size(), 1);
     QCOMPARE(result.issues.first().projectId, u"other"_s);
     QVERIFY(result.issues.first().message.contains(u"plain file name"_s));
+}
+
+void RegistryTests::aProjectCanKeepItsOwnData()
+{
+    QJsonObject withData = entry(u"overlay"_s);
+    withData.insert(u"keep"_s, QJsonArray {u"data"_s, u"settings/user.cfg"_s, u"Data"_s, u"profile.json"_s});
+
+    const RegistryParseResult result = RP::parse(document({withData, entry(u"plain"_s)}));
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.projects.size(), 2);
+    // In the order of the file, without a name twice (Windows does not tell "data" and "Data" apart).
+    QCOMPARE(
+        result.projects.at(0).keep, (QStringList {u"data"_s, u"settings/user.cfg"_s, u"profile.json"_s}));
+    QVERIFY(result.projects.at(1).keep.isEmpty()); // optional
+}
+
+void RegistryTests::keptDataMustNotContainTheStartFile()
+{
+    // The old file would replace the new program on every update.
+    QJsonObject same = entry(u"same"_s);
+    same.insert(u"keep"_s, QJsonArray {u"same.exe"_s});
+    QJsonObject inside = entry(u"inside"_s);
+    inside.insert(u"executable"_s, u"bin/Tool.exe"_s);
+    inside.insert(u"keep"_s, QJsonArray {u"BIN"_s});
+    QJsonObject fine = entry(u"fine"_s);
+    fine.insert(u"executable"_s, u"bin/Tool.exe"_s);
+    fine.insert(u"keep"_s, QJsonArray {u"bin-data"_s, u"data/bin"_s}); // names that merely start the same
+
+    const RegistryParseResult result = RP::parse(document({same, inside, fine}));
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.projects.size(), 1);
+    QCOMPARE(result.projects.first().id, u"fine"_s);
+    QCOMPARE(result.issues.size(), 2);
+    QVERIFY(result.issues.first().message.contains(u"start file"_s));
+}
+
+void RegistryTests::keepPaths_data()
+{
+    QTest::addColumn<QString>("value");
+    QTest::addColumn<bool>("valid");
+
+    QTest::newRow("a folder") << u"data"_s << true;
+    QTest::newRow("a file") << u"user.cfg"_s << true;
+    QTest::newRow("deeper") << u"data/profiles/main.json"_s << true;
+    QTest::newRow("a dot inside a name") << u"data.d/x"_s << true;
+    QTest::newRow("120 characters") << QString(120, u'k') << true;
+    QTest::newRow("121 characters") << QString(121, u'k') << false;
+    QTest::newRow("empty") << QString() << false;
+    QTest::newRow("the folder itself") << u"."_s << false;
+    QTest::newRow("a parent folder") << u".."_s << false;
+    QTest::newRow("leaving the folder") << u"data/../../x"_s << false;
+    QTest::newRow("absolute") << u"/data"_s << false;
+    QTest::newRow("drive") << u"C:/data"_s << false;
+    QTest::newRow("stream") << u"data:hidden"_s << false;
+    QTest::newRow("backslash") << u"a\\b"_s << false;
+    QTest::newRow("empty part") << u"data//x"_s << false;
+    QTest::newRow("trailing slash") << u"data/"_s << false;
+    QTest::newRow("trailing dot") << u"data."_s << false;
+    QTest::newRow("trailing space") << u"data "_s << false;
+    QTest::newRow("reserved name") << u"nul"_s << false;
+    QTest::newRow("reserved name with extension") << u"data/aux.txt"_s << false;
+    QTest::newRow("wildcard") << u"data/*"_s << false;
+    QTest::newRow("question mark") << u"da?a"_s << false;
+    QTest::newRow("control character") << u"da\ta"_s << false;
+}
+
+void RegistryTests::keepPaths()
+{
+    QFETCH(QString, value);
+    QFETCH(bool, valid);
+    QCOMPARE(RP::isValidKeepPath(value), valid);
 }
 
 void RegistryTests::unknownFieldsAreIgnored()
@@ -393,6 +468,17 @@ void RegistryTests::invalidEntryIsDroppedAndOthersSurvive_data()
     row("asset pattern with question mark", u"asset_pattern"_s, quoted(u"app?.zip"_s));
     row("asset pattern with colon", u"asset_pattern"_s, quoted(u"c:app.zip"_s));
     row("asset pattern empty", u"asset_pattern"_s, u"\"\""_s);
+
+    row("keep is not a list", u"keep"_s, quoted(u"data"_s));
+    row("keep with an empty entry", u"keep"_s, u"[\"\"]"_s);
+    row("keep entry is a number", u"keep"_s, u"[5]"_s);
+    row("keep with a parent folder", u"keep"_s, u"[\"../data\"]"_s);
+    row("keep with an absolute path", u"keep"_s, u"[\"/data\"]"_s);
+    row("keep with a drive", u"keep"_s, u"[\"C:/data\"]"_s);
+    row("keep with a backslash", u"keep"_s, uR"(["a\\b"])"_s);
+    row("keep entry too long", u"keep"_s, u"[\"" + QString(121, u'k') + u"\"]");
+    row("keep with nine entries", u"keep"_s, u"[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]"_s);
+    row("keep with a reserved name", u"keep"_s, u"[\"data/con\"]"_s);
 
     row("tag prefix empty", u"tag_prefix"_s, u"\"\""_s);
     row("tag prefix starts with a digit", u"tag_prefix"_s, quoted(u"1app-v"_s));

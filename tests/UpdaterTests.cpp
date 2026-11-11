@@ -153,7 +153,7 @@ private:
     {
         Files files = snapshot(root(),
             {branding::executableFileName(), u"extra.dll"_s, u"temp"_s, u"updater"_s, u"started.log"_s,
-                u"stop"_s});
+                u"cwd.log"_s, u"stop"_s});  // the traces the stand-in program leaves next to itself
         files.erase(u"logs/updater.log"_s); // the update run's own log: it writes it, nobody else's data
         return files;
     }

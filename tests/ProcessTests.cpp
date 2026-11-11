@@ -144,6 +144,35 @@ private slots:
         QVERIFY(!m_processes->lastExit(u"tool"_s).has_value());
     }
 
+    void aProjectIsStartedInItsOwnFolder()
+    {
+        QVERIFY(installTool());
+        // A second project next to it: whatever the launcher's own working folder is, a program
+        // looks for its files next to itself, so it is started in the folder it lives in.
+        QVERIFY(
+            sleepy::install(*m_layout, *m_installed, u"other"_s, u"OtherDir"_s, u"3.0.0"_s, u"Other.exe"_s));
+        const QString otherFolder = m_layout->currentDir(u"OtherDir"_s);
+
+        QVERIFY(m_processes->start(u"tool"_s).ok());
+        QVERIFY(m_processes->start(u"other"_s).ok());
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(current() + u"/cwd.log"_s), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(otherFolder + u"/cwd.log"_s), 10000);
+
+        const auto folderOf = [](const QString& installFolder) {
+            QFile file(installFolder + u"/cwd.log"_s);
+            return file.open(QIODevice::ReadOnly) ? QDir::cleanPath(QString::fromUtf8(file.readAll()))
+                                                  : QString();
+        };
+        QCOMPARE(folderOf(current()).toLower(), QDir::cleanPath(current()).toLower());
+        QCOMPARE(folderOf(otherFolder).toLower(), QDir::cleanPath(otherFolder).toLower());
+        QVERIFY(folderOf(current()).toLower() != folderOf(otherFolder).toLower());
+
+        sleepy::stop(current());
+        sleepy::stop(otherFolder);
+        QVERIFY(refreshUntil(
+            [&] { return !m_processes->isRunning(u"tool"_s) && !m_processes->isRunning(u"other"_s); }));
+    }
+
     void startingTwiceIsRefused()
     {
         QVERIFY(installTool());

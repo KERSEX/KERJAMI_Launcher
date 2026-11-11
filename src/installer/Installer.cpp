@@ -30,6 +30,18 @@ constexpr int kMaxWindowsPath = 259;
 constexpr int kMinPathBudget = 16;
 constexpr qint64 kMinProgramSize = 64; // the DOS header of a Windows program alone is 64 bytes
 
+/// True if the path below @p base passes through a link (a symbolic link or a junction) on the way.
+bool crossesLink(const QString& base, const QString& relative)
+{
+    QString path = base;
+    for (const QString& part : relative.split(u'/')) {
+        path += u'/' + part;
+        if (FileOps::isLink(path))
+            return true;
+    }
+    return false;
+}
+
 qint64 defaultAvailableSpace(const QString& folder)
 {
     const QStorageInfo storage(folder);
@@ -144,6 +156,24 @@ InstallResult Installer::run(Job& job)
         || !RegistryParser::isValidExecutablePath(project.executable)
         || (singleFile && project.executable.contains(u'/')))
         return failure(InstallError::InvalidProject, u"project id, folder or start file are not valid"_s);
+    // The data that is carried over must be safe paths, and must not contain the new program.
+    for (const QString& kept : project.keep) {
+        if (!RegistryParser::isValidKeepPath(kept)
+            || project.executable.compare(kept, Qt::CaseInsensitive) == 0
+            || project.executable.startsWith(kept + u'/', Qt::CaseInsensitive))
+            return failure(InstallError::InvalidProject, u"\"%1\" cannot be kept across updates"_s.arg(kept));
+    }
+
+    // Every project has a folder of its own. The list of projects makes sure of that (no two entries share a
+    // folder), but a project can leave the list while it stays installed, and another entry can then ask
+    // for the same folder. That one must not push the installed project's files aside.
+    for (const InstalledProject& other : m_installed.all()) {
+        if (other.projectId != id
+            && other.installDirectory.compare(project.installDirectory, Qt::CaseInsensitive) == 0)
+            return failure(InstallError::InvalidProject,
+                u"the folder \"%1\" belongs to the installed project \"%2\""_s.arg(
+                    project.installDirectory, other.projectId));
+    }
 
     const std::optional<SemVer> version = SemVer::parse(request.version);
     if (!version)
@@ -267,6 +297,24 @@ InstallResult Installer::run(Job& job)
         discardStaging();
         return failure(InstallError::ExtractionFailed,
             u"start file \"%1\" is missing after extraction"_s.arg(project.executable));
+    }
+
+    // --- 4b. the project's own data -----------------------------------------------
+    // What the project keeps next to itself (settings, say) is copied from the installed version into the
+    // new one, while the installed version is still in place: a failure here leaves it as it was. The
+    // user's file wins over a file of the same name in the new version; files that only the new version
+    // has stay. The installed version keeps its copy in the backup, so a rollback finds everything.
+    if (!project.keep.isEmpty() && QFileInfo::exists(current) && !FileOps::isLink(current)) {
+        for (const QString& kept : project.keep) {
+            const QString from = current + u'/' + kept;
+            if (!QFileInfo::exists(from) || crossesLink(current, kept))
+                continue;
+            QString copyError;
+            if (!FileOps::copyTree(from, staging + u'/' + kept, &copyError)) {
+                discardStaging();
+                return failure(InstallError::CarryOverFailed, u"\"%1\": %2"_s.arg(kept, copyError));
+            }
+        }
     }
 
     if (job.cancel) {

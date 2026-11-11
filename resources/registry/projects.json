@@ -16,6 +16,7 @@
       "tag_prefix": "KERS_SubsystemsV",
       "asset_pattern": "KERS_Subsystems.exe",
       "executable": "KERS_Subsystems.exe",
+      "keep": ["data"],
       "install_directory": "KERS_Overlay"
     }
   ]

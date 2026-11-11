@@ -38,6 +38,7 @@ will, tut das im Launcher selbst.
   "tag_prefix": "BeispielProjektV",
   "asset_pattern": "Beispiel_Projekt-Windows-x64.zip",
   "executable": "Beispiel_Projekt.exe",
+  "keep": ["data"],
   "install_directory": "Beispiel_Projekt"
 }
 ```
@@ -59,6 +60,7 @@ will, tut das im Launcher selbst.
 | `tag_prefix` | nein | Text, mit dem die Release-Tags des Projekts vor der Versionsnummer beginnen, zum Beispiel `KERS_SubsystemsV` für das Tag `KERS_SubsystemsV0.3.1`. Der Launcher schneidet ihn ab und liest den Rest als Version. Er besteht aus 1 bis 32 Buchstaben, Ziffern, `.`, `_` oder `-` und beginnt mit einem Buchstaben, ohne `/`. Groß- und Kleinschreibung zählt. Ohne dieses Feld ist das ganze Tag die Version (`1.2.0` oder `v1.2.0`). Mit dem Feld zählen nur Tags, die so beginnen. |
 | `asset_pattern` | ja | Dateiname der Release-Datei auf GitHub. Ein `*` steht für beliebige Zeichen, zum Beispiel `Projekt-*-Windows-x64.zip`. Das Muster endet auf `.zip` (ein Archiv mit dem Programm und seinen Dateien) oder auf `.exe` (das Programm selbst, als einzelne Datei) und darf keinen Pfad enthalten. Genau eine Datei des neuesten Releases muss passen. |
 | `executable` | ja | Bei einem ZIP: Pfad der Start-Datei innerhalb des Archivs, mit `/` als Trenner und auf `.exe` endend, ohne absolute Pfade und `..`. Bei einer einzelnen `.exe`: der Dateiname, unter dem das Programm installiert wird, ohne Pfad. |
+| `keep` | nein | Dateien und Ordner unterhalb des Installationsordners, die dem Projekt gehören (Einstellungen, Profile) und bei einem Update in die neue Version übernommen werden, zum Beispiel `["data"]`. Höchstens 8 relative Pfade mit `/`, ohne `..`, Laufwerk und `\`; die Startdatei darf nicht dazugehören und nicht in einem genannten Ordner liegen. Was in der alten Version dort liegt, gewinnt gegen eine gleichnamige Datei des neuen Pakets. Ohne dieses Feld bleibt alles, was ein Projekt neben sich anlegt, bei einem Update in der Sicherung. |
 | `install_directory` | ja | Ordnername unterhalb der Projektbibliothek des Launchers. Buchstaben, Ziffern, `_`, `-` und `.`, höchstens 64 Zeichen. Jedes Projekt braucht einen eigenen Ordner. |
 
 ## Was der Launcher prüft

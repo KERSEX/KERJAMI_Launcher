@@ -125,6 +125,35 @@ public:
         return value.toBool();
     }
 
+    /// The optional list of paths a project keeps across updates.
+    QStringList keepPaths(QLatin1StringView key)
+    {
+        if (!ok())
+            return {};
+        const QJsonValue value = m_object.value(key);
+        if (value.isUndefined())
+            return {};
+        if (!value.isArray()) {
+            fail(u"\"%1\" must be a list"_s.arg(key));
+            return {};
+        }
+        const QJsonArray array = value.toArray();
+        if (array.size() > RegistryParser::kMaxKeepPaths) {
+            fail(u"\"%1\" has more than %2 entries"_s.arg(key).arg(RegistryParser::kMaxKeepPaths));
+            return {};
+        }
+        QStringList result;
+        for (const QJsonValue& item : array) {
+            if (!item.isString() || !RegistryParser::isValidKeepPath(item.toString())) {
+                fail(u"\"%1\" has an entry that is not a safe relative path"_s.arg(key));
+                return {};
+            }
+            if (!result.contains(item.toString(), Qt::CaseInsensitive))
+                result.append(item.toString());
+        }
+        return result;
+    }
+
     QStringList tags(QLatin1StringView key)
     {
         if (!ok())
@@ -246,8 +275,21 @@ std::optional<Project> parseEntry(const QJsonValue& value, QString* error)
         u"a ZIP or EXE file name without a path; * is the only wildcard"_s);
     project.executable = reader.identifier("executable"_L1, RegistryParser::isValidExecutablePath,
         u"a relative path with / separators ending in .exe"_s);
+    project.keep = reader.keepPaths("keep"_L1);
     project.installDirectory = reader.identifier("install_directory"_L1,
         RegistryParser::isValidInstallDirectory, u"a single, Windows-safe folder name"_s);
+
+    // The data that is carried over must not be the start file or contain it: the old file would
+    // replace the new program.
+    if (reader.ok()) {
+        for (const QString& kept : std::as_const(project.keep)) {
+            if (project.executable.compare(kept, Qt::CaseInsensitive) == 0
+                || project.executable.startsWith(kept + u'/', Qt::CaseInsensitive)) {
+                reader.fail(u"\"keep\" must not name the start file or a folder that holds it"_s);
+                break;
+            }
+        }
+    }
 
     // A single program has no folders inside: "executable" is the name it is installed under.
     if (reader.ok() && RegistryParser::isSingleFileAsset(project.assetPattern)
@@ -323,11 +365,10 @@ bool isValidTagPrefix(const QString& prefix)
     return matchesWhole(u"[A-Za-z][A-Za-z0-9._-]{0,31}"_s, prefix);
 }
 
-bool isValidExecutablePath(const QString& path)
+/// True if every part of a relative path with "/" separators is one Windows can store and none leaves the
+/// folder.
+static bool hasOnlySafeParts(const QString& path)
 {
-    if (path.isEmpty() || path.size() > kMaxExecutableLength
-        || !path.endsWith(".exe"_L1, Qt::CaseInsensitive))
-        return false;
     // No leading "/", no drive letter or stream marker (":"), no backslashes.
     if (path.startsWith(u'/') || path.contains(u':') || path.contains(u'\\'))
         return false;
@@ -342,6 +383,22 @@ bool isValidExecutablePath(const QString& path)
             return c.unicode() < 0x20 || c.unicode() == 0x7F || QStringView(u"*?\"<>|").contains(c);
         });
     });
+}
+
+bool isValidExecutablePath(const QString& path)
+{
+    if (path.isEmpty() || path.size() > kMaxExecutableLength
+        || !path.endsWith(".exe"_L1, Qt::CaseInsensitive))
+        return false;
+    return hasOnlySafeParts(path);
+}
+
+bool isValidKeepPath(const QString& path)
+{
+    constexpr qsizetype kMaxKeepPathLength = 120;
+    if (path.isEmpty() || path.size() > kMaxKeepPathLength)
+        return false;
+    return hasOnlySafeParts(path);
 }
 
 RegistryParseResult parse(const QByteArray& json)

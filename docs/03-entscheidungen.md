@@ -528,8 +528,9 @@ prüfen → **erst jetzt** die installierte Version nach `backups/<Version>/` ve
 - **Backups:** Die zwei neuesten bleiben, ältere werden gelöscht. Dieselbe Version ein zweites Mal
   (Neuinstallation) und ein Ordner ohne Eintrag (`unknown`) bekommen einen Zeitstempel, damit nichts
   überschrieben wird. Benutzerdaten, die ein Projekt in `current/` anlegt, wandern bei einer
-  Aktualisierung mit der alten Version ins Backup. Projekte sollten Nutzerdaten außerhalb von
-  `current/` ablegen; das ist eine Anforderung an Projekte, nicht an den Launcher.
+  Aktualisierung mit der alten Version ins Backup, **es sei denn, der Eintrag des Projekts nennt sie in `keep`
+  (D-47)**: Dann werden sie in die neue Version übernommen. Alles andere in `current/` bleibt bei der alten
+  Version. Projekte, die ihre Daten außerhalb ablegen (etwa in `%APPDATA%`), brauchen `keep` nicht.
 - **Platz:** Entpackte Größe plus 16 MiB müssen auf dem Laufwerk von `temp/` frei sein.
 - **Abbrechen:** bis zum Beginn des Austauschs möglich (Prüfsumme, Entpacken); danach nicht mehr.
 - **Heruntergeladene Datei:** Nach jedem Versuch, gelungen oder nicht, löscht der Dienst das ZIP aus
@@ -882,8 +883,8 @@ als einfacher Weg für Tests und Werkzeuge.
   keine. Ihr Schutz ist die Prüfsumme. `MZ` ist keine Sicherheitsprüfung, es verhindert nur, dass etwas ganz
   anderes (ein ZIP, eine Fehlerseite) als Programm abgelegt und später gestartet wird.
 - **Grenzen:** Ein Projekt aus mehreren Dateien braucht ein ZIP. Bei einem Update wird `current/` als Ganzes ersetzt
-  (D-30); was das Programm neben sich anlegt, liegt danach in der Sicherung. Der Launcher selbst erscheint weiter als
-  ZIP (D-39).
+  (D-30); was das Programm neben sich anlegt, liegt danach in der Sicherung, außer der Eintrag nennt es in `keep`
+  (D-47). Der Launcher selbst erscheint weiter als ZIP (D-39).
 - **Tests:** `InstallerTests` (frisch, Update mit Sicherung und Rollback, „kein Programm“ als Tabelle, Hash, Pfad als
   `executable`), `InstallServiceTests` (die ganze Kette mit Präfix-Tag und Einzel-EXE), `RegistryTests`, und der
   Live-Test gegen KERS Overlay.
@@ -957,6 +958,48 @@ als einfacher Weg für Tests und Werkzeuge.
   Assets eines Release hochladen (`docs/04-veroeffentlichen.md`). Das passt zu E-06: Dafür muss kein Quelltext auf
   GitHub liegen.
 
+### D-47 Daten, die ein Projekt über Updates behält (`keep`)
+
+- **Anlass:** Der Lauf mit KERS Overlay am 2026-11-11 zeigte, dass ein Projekt beim Start einen Ordner `data/` neben
+  seine Programmdatei legt, mit den eigenen Einstellungen. Ein Update ersetzt `current/` als Ganzes (D-30); diese
+  Einstellungen wären danach nur noch in der Sicherung gewesen, die neue Version hätte leer angefangen.
+- **Entscheidung (Team, 2026-11-11):** Der Eintrag eines Projekts darf eine Liste `keep` haben: Dateien und Ordner
+  unterhalb des Installationsordners, die dem Projekt gehören. Der Launcher nimmt sie bei jedem Update in die neue
+  Version mit. KERS Overlay: `"keep": ["data"]`.
+- **Form:** Höchstens 8 Einträge, jeder ein relativer Pfad mit `/` (`isValidKeepPath`: keine Laufwerke, kein `..`,
+  kein `\`, kein `:`, keine leeren Teile, keine Namen, die Windows nicht speichern kann; höchstens 120 Zeichen).
+  Doppelte Namen (auch in anderer Schreibweise) zählen einmal. Ein Eintrag, der die Startdatei nennt oder einen
+  Ordner, der sie enthält, fällt durch, denn die alte Datei würde bei jedem Update das neue Programm ersetzen.
+- **Ablauf im Installer:** Nach dem Entpacken und der Prüfung der Startdatei, **bevor** irgendetwas an der
+  installierten Version geändert wird, kopiert er jeden genannten Pfad aus `current/` nach `temp/staging-<Projekt>/`.
+  Ein Ordner wird zusammengeführt, eine Datei ersetzt eine gleichnamige. **Was der Nutzer angelegt hat, gewinnt**
+  gegen eine gleichnamige Datei des neuen Pakets; Dateien, die nur das neue Paket hat, bleiben. Danach geht es wie
+  immer weiter (D-30): Sicherung der alten Version, Austausch, Eintragen.
+- **Warum kopieren und nicht verschieben:** Die alte Version behält ihre Daten in der Sicherung. Ein Rollback
+  (`current/` ← Backup) findet deshalb alles, und ein Fehler beim Kopieren lässt die installierte Version unberührt.
+- **Fehler:** Lässt sich eine Datei nicht kopieren (zum Beispiel weil ein Programm sie exklusiv hält), scheitert das
+  Update mit `InstallError::CarryOverFailed` und der Meldung „Die Daten des Projekts … konnten nicht übernommen
+  werden … die bisherige Version bleibt erhalten“. Es wird nichts verändert: keine Sicherung, kein Staging.
+- **Links:** Eine Verknüpfung oder Junction wird weder betreten noch kopiert, auch nicht, wenn sie ein genannter Pfad
+  selbst ist oder auf dem Weg zu ihm liegt. Sonst könnte ein Link in den Daten Dateien von außerhalb in die neue
+  Version ziehen.
+- **Ohne Daten:** Gibt es einen genannten Pfad (noch) nicht, zum Beispiel bei der ersten Installation, wird er
+  übersprungen. Das ist kein Fehler.
+- **Sichtbar für den Nutzer:** Die Rückfrage vor einem Update sagt, welche Daten übernommen werden („Deine Daten
+  (data) werden in die neue Version übernommen.“).
+- **Grenzen:** Die Namen stehen im Eintrag. Der Launcher sieht nicht, was ein Projekt anlegt. Große Datenordner werden
+  bei jedem Update kopiert und liegen dann zweimal auf der Platte (neu und in der Sicherung); `keep` ist für
+  Einstellungen gedacht, nicht für Spielstände von Gigabytes. Dateien in einem genannten Ordner, die das neue Paket
+  mitbringt, überschreibt die alte Fassung. Ein Projekt, das aktualisierte Standarddateien in seinen Datenordner
+  liefert, nennt sie also besser nicht in `keep` oder legt sie woanders ab.
+- **Deinstallation:** Sie löscht den ganzen Projektordner, also auch die Daten aus `keep` und alle Sicherungen.
+  Die Rückfrage sagt das ausdrücklich („Auch die Daten des Projekts (data) werden gelöscht.“) und nennt als
+  unberührt nur die Einstellungen des Launchers. Eine Option „Daten behalten“ gibt es nicht.
+- **Tests:** `RegistryTests` (Feld, Pfadregeln als Tabelle, Startdatei), `InstallerTests` (Ordner und Dateien,
+  Nutzer gewinnt und Neues bleibt, nichts vorhanden, einzelne EXE wie bei KERS Overlay, gesperrte Datei stoppt das
+  Update ohne Änderung, Links werden nie verfolgt, Startdatei in `keep` wird abgelehnt) und `RegistryManagerTests`
+  (jeder Eintrag der eingebauten Liste hat gültige Pfade).
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch und löst Links und Junctions nicht auf. Die
@@ -995,6 +1038,14 @@ als einfacher Weg für Tests und Werkzeuge.
   Windows-Programmkopf, Installation in 4,8 s, danach nichts übrig. Damit ist die Kette (Adressen, Digest-Feld,
   Weiterleitung, Prüfsumme, Installation, Deinstallation) **für eine einzelne EXE** gegen echtes GitHub gemessen
   und nicht mehr nur nachgestellt. Für ein ZIP, ein Update und das Selbstupdate gilt das weiter nicht (E-02).
+  Mit `LAUNCHER_LIVE_START_TESTS=1` zusätzlich startet der Test das installierte Programm über den
+  `ProcessManager`, beobachtet es zehn Sekunden, bittet seine Fenster zu schließen (erst danach würde er es
+  beenden), wartet auf das Prozessende und deinstalliert dann. **Lauf vom 2026-11-11** (mit Erlaubnis des
+  Teams): Das Overlay startete aus `library/KERS_Overlay/current/` (das Abbild des Prozesses ist genau diese
+  Datei), lief nach zehn Sekunden noch, zeigte zwei sichtbare Fenster, ließ sich durch die Aufforderung zum
+  Schließen beenden, kein Prozess blieb übrig, und die Deinstallation ging danach durch. Es legte neben sich
+  einen Ordner `data/` an. Der Start im Arbeitsordner des Projekts ist außerdem mit einem Hilfsprogramm getestet
+  (`ProcessTests::aProjectIsStartedInItsOwnFolder`).
 - Der Schutz vor dem Überschreiben eines laufenden Projekts beruht auf der Windows-Dateisperre: Die
   EXE eines laufenden Programms und jede geöffnete Datei in `current/` verhindern das Umbenennen
   des Ordners. Das ist getestet (Datei ohne Löschfreigabe offen halten). Ein Programm, das aus
@@ -1009,7 +1060,12 @@ als einfacher Weg für Tests und Werkzeuge.
   als formatierter Text. Eine Detailseite mit Darstellung folgt in Phase 7.
 - Nach einer Aktualisierung startet der Launcher das Projekt nicht neu, auch wenn es vorher lief.
 - Eine Aktualisierung ersetzt `current/` als Ganzes. Dateien, die ein Projekt zur Laufzeit in
-  `current/` anlegt, liegen danach im Backup, nicht in der neuen Version (D-30).
+  `current/` anlegt, liegen danach im Backup, nicht in der neuen Version (D-30), **außer sie stehen im Feld `keep`
+  des Eintrags (D-47)**. Das war kein theoretischer Fall: KERS Overlay legt beim Start `data/` neben sich an
+  (Lauf vom 2026-11-11), darin seine Einstellungen. Sein Eintrag nennt deshalb `"keep": ["data"]`. Ein Projekt
+  muss diese Namen kennen und im Eintrag nennen; legt es Daten an einer Stelle an, die der Eintrag nicht nennt,
+  gehen sie beim Update wie bisher in die Sicherung. Wer `keep` braucht, sagt es im Eintrag, der Launcher rät
+  nicht.
 - Das ZIP muss die Startdatei am Pfad der Registry enthalten und darf kein ZIP64, keine
   Verschlüsselung und keine Nicht-ASCII-Namen ohne UTF-8-Kennzeichen haben (D-27, D-29). Die Fehlermeldung
   nennt den Grund; die Ursache liegt dann beim Projekt, das neu packen muss.

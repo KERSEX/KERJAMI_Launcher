@@ -97,6 +97,14 @@ bool isValidTagPrefix(const QString& prefix);
 /// A relative path with "/" separators that ends in ".exe" and cannot leave the install folder.
 bool isValidExecutablePath(const QString& path);
 
+/// The most files and folders a project can name in "keep".
+inline constexpr qsizetype kMaxKeepPaths = 8;
+
+/// A file or folder below the install folder that a project keeps across updates: a relative path
+/// with "/" separators and parts Windows can store, no "..", no drive, no backslash, at most 120
+/// characters. Whether it is a file or a folder is not told; the installer sees that.
+bool isValidKeepPath(const QString& path);
+
 /// True for names Windows reserves for devices ("CON", "NUL", "COM1", ...),
 /// also with an extension ("con.txt"). Such a file or folder cannot be created.
 bool isReservedWindowsName(const QString& name);

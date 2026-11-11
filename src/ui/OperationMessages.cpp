@@ -129,6 +129,10 @@ QString installText(const OperationFailure& failure)
         return archiveRejectedText(failure.subcode) + u' ' + tr("Es wurde nichts installiert.");
     case InstallError::NotAProgram:
         return tr("Die heruntergeladene Datei ist kein Windows-Programm. Es wurde nichts installiert.");
+    case InstallError::CarryOverFailed:
+        return tr("Die Daten des Projekts (zum Beispiel Einstellungen) konnten nicht in die neue Version "
+                  "übernommen werden, weil eine Datei in Benutzung ist oder sich nicht lesen lässt. Es wurde "
+                  "nichts verändert, die bisherige Version bleibt erhalten.");
     case InstallError::InsufficientSpace:
         return tr("Nicht genug freier Speicherplatz zum Entpacken.");
     case InstallError::PathTooLong:

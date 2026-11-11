@@ -70,6 +70,25 @@ bool makeJunction(const QString& link, const QString& target)
 }
 
 #ifdef Q_OS_WIN
+/// Holds a file so that nobody else may even read it (a program that keeps its settings open exclusively).
+class ExclusiveLock {
+public:
+    explicit ExclusiveLock(const QString& path)
+        : m_handle(CreateFileW(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(path).utf16()),
+              GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr))
+    {
+    }
+    ~ExclusiveLock()
+    {
+        if (m_handle != INVALID_HANDLE_VALUE)
+            CloseHandle(m_handle);
+    }
+    bool isLocked() const { return m_handle != INVALID_HANDLE_VALUE; }
+
+private:
+    HANDLE m_handle;
+};
+
 /// Keeps a file open the way a running program does: nobody may delete or rename it.
 class FileLock {
 public:
@@ -316,6 +335,238 @@ private slots:
         const QStringList kept = QDir(backups()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
         QCOMPARE(kept.size(), 2);
         QVERIFY(kept.contains(u"1.0.0"_s));
+    }
+
+    /// A second project, with files and a folder of its own.
+    InstallRequest otherRequest(const QString& version)
+    {
+        InstallRequest request;
+        request.project = m_project;
+        request.project.id = u"other-tool"_s;
+        request.project.name = u"Other Tool"_s;
+        request.project.executable = u"Other.exe"_s;
+        request.project.installDirectory = u"OtherTool"_s;
+        request.version = version;
+        request.tag = u"v"_s + version;
+        request.archivePath = root(u"downloads/other-tool/Other-"_s + version + u".zip"_s);
+        const QList<testzip::Entry> entries {
+            testzip::file(u"Other.exe"_s, "OTHER-" + version.toUtf8()),
+            testzip::file(u"readme.txt"_s, "readme of the other tool"),
+        };
+        [&] { QVERIFY(writeFile(request.archivePath, testzip::build(entries))); }();
+        request.sha256 = launcher::HashVerifier::sha256File(request.archivePath);
+        return request;
+    }
+
+    void install_everyProjectGetsAFolderOfItsOwn()
+    {
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        const InstallResult second = installAndWait(otherRequest(u"5.0.0"_s));
+        QVERIFY2(second.ok(), qPrintable(second.detail));
+
+        // Two folders in the library, each with its own files and nothing of the other's.
+        QCOMPARE(QDir(library()).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name),
+            (QStringList {u"OtherTool"_s, u"TestTool"_s}));
+        QCOMPARE(readFile(current(u"bin/Tool.exe"_s)), QByteArray("EXE-1.0.0"));
+        QVERIFY(!QFileInfo::exists(current(u"Other.exe"_s)));
+        QCOMPARE(readFile(library(u"OtherTool/current/Other.exe"_s)), QByteArray("OTHER-5.0.0"));
+        QVERIFY(!QFileInfo::exists(library(u"OtherTool/current/bin"_s)));
+
+        // The list keeps them apart, too.
+        QCOMPARE(m_installed->get(u"test-tool"_s)->installDirectory, u"TestTool"_s);
+        QCOMPARE(m_installed->get(u"other-tool"_s)->installDirectory, u"OtherTool"_s);
+
+        // Updating one leaves the other exactly as it was, backups included.
+        const QByteArray otherBefore = readFile(library(u"OtherTool/current/Other.exe"_s));
+        QVERIFY(installAndWait(releaseRequest(u"2.0.0"_s)).ok());
+        expectInstalled(u"2.0.0"_s);
+        QCOMPARE(readFile(library(u"OtherTool/current/Other.exe"_s)), otherBefore);
+        QCOMPARE(m_installed->get(u"other-tool"_s)->version, u"5.0.0"_s);
+        QVERIFY(!QFileInfo::exists(library(u"OtherTool/backups"_s)));
+        QVERIFY(QFileInfo::exists(backups(u"1.0.0/bin/Tool.exe"_s)));
+    }
+
+    void install_refusesTheFolderOfAnotherInstalledProject()
+    {
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+
+        // Another project that asks for the same folder (in other letters, as Windows does not tell them
+        // apart).
+        InstallRequest intruder = otherRequest(u"5.0.0"_s);
+        intruder.project.installDirectory = u"testtool"_s;
+        const InstallResult result = installAndWait(intruder);
+        QCOMPARE(result.error, InstallError::InvalidProject);
+        QVERIFY(result.detail.contains(u"test-tool"_s));
+
+        // The installed project is untouched, and the intruder was not registered.
+        expectInstalled(u"1.0.0"_s);
+        QVERIFY(!QFileInfo::exists(backups()));
+        QVERIFY(!m_installed->contains(u"other-tool"_s));
+        QVERIFY(leftovers().isEmpty());
+
+        // The same project may of course be installed again (a reinstall or an update).
+        QVERIFY(installAndWait(releaseRequest(u"1.1.0"_s)).ok());
+    }
+
+    // --- the project's own data survives an update (D-47) ----------------------------------
+
+    /// Writes data the way a running project would: settings and a cache beside the program, and a scratch
+    /// file.
+    void writeUserData()
+    {
+        QVERIFY(writeFile(current(u"settings/profile.json"_s), "mine"));
+        QVERIFY(writeFile(current(u"settings/deep/cache.bin"_s), "cache"));
+        QVERIFY(writeFile(current(u"user.cfg"_s), "cfg"));
+        QVERIFY(writeFile(current(u"scratch.tmp"_s), "scratch"));
+    }
+
+    void update_carriesTheProjectsOwnData()
+    {
+        m_project.keep = {u"settings"_s, u"user.cfg"_s};
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        writeUserData();
+
+        const InstallResult result = installAndWait(releaseRequest(u"2.0.0"_s));
+        QVERIFY2(result.ok(), qPrintable(result.detail));
+        expectInstalled(u"2.0.0"_s); // the new program is there ...
+
+        // ... with the data the user made, folders and files, deep inside too.
+        QCOMPARE(readFile(current(u"settings/profile.json"_s)), QByteArray("mine"));
+        QCOMPARE(readFile(current(u"settings/deep/cache.bin"_s)), QByteArray("cache"));
+        QCOMPARE(readFile(current(u"user.cfg"_s)), QByteArray("cfg"));
+        // What is not named stays with the old version, as before.
+        QVERIFY(!QFileInfo::exists(current(u"scratch.tmp"_s)));
+        QCOMPARE(readFile(backups(u"1.0.0/scratch.tmp"_s)), QByteArray("scratch"));
+        // And the old version keeps its own copy: nothing is moved away from it.
+        QCOMPARE(readFile(backups(u"1.0.0/settings/profile.json"_s)), QByteArray("mine"));
+        QCOMPARE(readFile(backups(u"1.0.0/user.cfg"_s)), QByteArray("cfg"));
+        QVERIFY(leftovers().isEmpty());
+
+        // A third version brings the data along again.
+        QVERIFY(installAndWait(releaseRequest(u"3.0.0"_s)).ok());
+        QCOMPARE(readFile(current(u"settings/profile.json"_s)), QByteArray("mine"));
+    }
+
+    void update_theUsersFileWinsAndNewFilesStay()
+    {
+        // "data" is kept, and the new version also has files in it.
+        m_project.keep = {u"data"_s};
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok()); // has data/version.txt
+        QVERIFY(writeFile(current(u"data/version.txt"_s), "edited by the user"));
+        QVERIFY(writeFile(current(u"data/mine.txt"_s), "mine"));
+
+        QList<testzip::Entry> entries = releaseFiles(u"2.0.0"_s);
+        entries.append(testzip::file(u"data/new-default.json"_s, "a default of 2.0.0"));
+        QVERIFY(installAndWait(makeRequest(entries, u"2.0.0"_s)).ok());
+
+        QCOMPARE(readFile(current(u"bin/Tool.exe"_s)), QByteArray("EXE-2.0.0"));
+        QCOMPARE(
+            readFile(current(u"data/version.txt"_s)), QByteArray("edited by the user")); // the user's wins
+        QCOMPARE(readFile(current(u"data/mine.txt"_s)), QByteArray("mine"));
+        QCOMPARE(
+            readFile(current(u"data/new-default.json"_s)), QByteArray("a default of 2.0.0")); // the new stays
+    }
+
+    void update_aKeptItemThatIsNotThereIsNoProblem()
+    {
+        m_project.keep = {u"settings"_s, u"user.cfg"_s};
+        // The first installation has nothing to carry over, and the second version finds nothing to carry.
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        QVERIFY(installAndWait(releaseRequest(u"2.0.0"_s)).ok());
+        expectInstalled(u"2.0.0"_s);
+        QVERIFY(!QFileInfo::exists(current(u"settings"_s)));
+        QVERIFY(!QFileInfo::exists(current(u"user.cfg"_s)));
+    }
+
+    void update_aSingleProgramKeepsItsDataToo()
+    {
+        // As KERS Overlay: the program alone is the release, and it writes "data" next to itself.
+        useSingleFileProject();
+        m_project.keep = {u"data"_s};
+        QVERIFY(installAndWait(programRequest(u"1.0.0"_s)).ok());
+        QVERIFY(writeFile(current(u"data/settings.json"_s), "{\"overlay\": true}"));
+
+        QVERIFY(installAndWait(programRequest(u"2.0.0"_s)).ok());
+        QVERIFY(readFile(current(u"Tool.exe"_s)).endsWith("PROGRAM-2.0.0"));
+        QCOMPARE(readFile(current(u"data/settings.json"_s)), QByteArray("{\"overlay\": true}"));
+        QCOMPARE(m_installed->get(u"test-tool"_s)->version, u"2.0.0"_s);
+    }
+
+#ifdef Q_OS_WIN
+    void update_dataThatCannotBeCopiedStopsTheUpdate()
+    {
+        m_project.keep = {u"settings"_s};
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        writeUserData();
+
+        {
+            // The program holds its settings exclusively: they cannot be read, so they cannot be carried
+            // over.
+            ExclusiveLock lock(current(u"settings/profile.json"_s));
+            QVERIFY(lock.isLocked());
+            const InstallResult result = installAndWait(releaseRequest(u"2.0.0"_s));
+            QCOMPARE(result.error, InstallError::CarryOverFailed);
+            QVERIFY(result.detail.contains(u"settings"_s));
+
+            // Nothing happened: the old version, its data and its record are as they were; no backup, no
+            // staging.
+            expectInstalled(u"1.0.0"_s);
+            QVERIFY(QFileInfo::exists(
+                current(u"settings/profile.json"_s))); // (it cannot be read while it is held)
+            QVERIFY(!QFileInfo::exists(backups()));
+            QVERIFY(leftovers().isEmpty());
+        }
+        QCOMPARE(readFile(current(u"settings/profile.json"_s)), QByteArray("mine"));
+
+        // Without the lock, the same update works.
+        QVERIFY(installAndWait(releaseRequest(u"2.0.0"_s)).ok());
+        QCOMPARE(readFile(current(u"settings/profile.json"_s)), QByteArray("mine"));
+    }
+
+    void update_aLinkInTheDataIsNeverFollowed()
+    {
+        m_project.keep = {u"data"_s};
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        QTemporaryDir outside;
+        QVERIFY(outside.isValid());
+        QVERIFY(writeFile(outside.filePath(u"precious.txt"_s), "outside"));
+        QVERIFY(writeFile(current(u"data/real.txt"_s), "real"));
+        if (!makeJunction(current(u"data/linked"_s), outside.path()))
+            QSKIP("directory junctions cannot be created here");
+
+        QVERIFY(installAndWait(releaseRequest(u"2.0.0"_s)).ok());
+        QCOMPARE(readFile(current(u"data/real.txt"_s)), QByteArray("real"));
+        QVERIFY(!QFileInfo::exists(current(u"data/linked"_s))); // the link was left out, not copied
+        QCOMPARE(readFile(outside.filePath(u"precious.txt"_s)),
+            QByteArray("outside")); // and nothing was reached through it
+    }
+
+    void update_aKeptFolderThatIsALinkIsSkipped()
+    {
+        m_project.keep = {u"data"_s};
+        QVERIFY(installAndWait(releaseRequest(u"1.0.0"_s)).ok());
+        QTemporaryDir outside;
+        QVERIFY(outside.isValid());
+        QVERIFY(writeFile(outside.filePath(u"secret.txt"_s), "secret"));
+        QVERIFY(QDir(current()).removeRecursively() && QDir().mkpath(current()));
+        QVERIFY(writeFile(current(u"bin/Tool.exe"_s), "EXE-1.0.0"));
+        if (!makeJunction(current(u"data"_s), outside.path()))
+            QSKIP("directory junctions cannot be created here");
+
+        QVERIFY(installAndWait(releaseRequest(u"2.0.0"_s)).ok());
+        // "data" of the new version is the one from the package; nothing from behind the link came along.
+        QVERIFY(!QFileInfo::exists(current(u"data/secret.txt"_s)));
+        QCOMPARE(readFile(outside.filePath(u"secret.txt"_s)), QByteArray("secret"));
+    }
+#endif
+
+    void install_refusesKeptDataThatContainsTheProgram()
+    {
+        m_project.keep = {u"bin"_s}; // the start file is bin/Tool.exe: the old one would replace the new one
+        const InstallResult result = installAndWait(releaseRequest(u"1.0.0"_s));
+        QCOMPARE(result.error, InstallError::InvalidProject);
+        QVERIFY(result.detail.contains(u"bin"_s));
+        QVERIFY(!QFileInfo::exists(current()));
     }
 
     void install_firstInstallWithExistingUnregisteredFolder()

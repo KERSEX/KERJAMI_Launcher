@@ -397,7 +397,9 @@ namespace Storage {                               // installer/Storage.h
 `ui::AppContext` bekommt den `ReleaseManager` für die Detailseite. Das Dashboard zeigt Updates, installierte und
 zuletzt gestartete Projekte und die Empfehlungen der Liste. Die Einstellungen bekommen die Speicherverwaltung. Dazu
 kommt die Installation einer **einzelnen EXE als Release** (`RegistryParser::isSingleFileAsset`,
-`InstallError::NotAProgram`). Entscheidungen: [03-entscheidungen.md](03-entscheidungen.md), D-44 und D-45.
+`InstallError::NotAProgram`) und das Feld **`keep`** im Registry-Eintrag, das Daten eines Projekts (Einstellungen)
+bei einem Update in die neue Version übernimmt (`FileOps::copyTree`, `InstallError::CarryOverFailed`).
+Entscheidungen: [03-entscheidungen.md](03-entscheidungen.md), D-44, D-45 und D-47.
 
 ### Phase 8 – Portable Release (umgesetzt)
 

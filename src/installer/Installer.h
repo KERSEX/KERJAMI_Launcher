@@ -25,6 +25,7 @@ enum class InstallError {
     ArchiveUnreadable, ///< Not a ZIP file, damaged, or a ZIP feature the launcher does not support.
     ArchiveRejected,   ///< The archive breaks a safety rule, see InstallResult::validation.
     NotAProgram,       ///< A single-file release that is not a Windows program.
+    CarryOverFailed,   ///< The project's own data ("keep") could not be copied into the new version.
     InsufficientSpace,
     PathTooLong,        ///< The launcher folder lies so deep that Windows paths would exceed their limit.
     ExtractionFailed,   ///< Writing the files failed (disk, permissions, damaged data).
