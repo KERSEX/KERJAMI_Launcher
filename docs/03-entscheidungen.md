@@ -37,19 +37,12 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 - **Bis dahin:** Alle Tests laufen gegen einen lokalen Server im Testprozess.
 - **Betrifft:** Phase 4 und 5 (echter Test). Phase 2 und 3 sind nicht blockiert.
 
-### E-03 Registry-Repository
+### E-03 Registry-Repository (erledigt: es gibt keines)
 
-- Das Launcher-Repository ist `KERSEX/KERJAMI_Launcher` (angelegt, öffentlich, noch leer).
-- Das Registry-Repository existiert nicht. Der Name `CommunityLauncher-Registry` aus dem Auftrag
-  passt nicht mehr zum Launcher-Namen. Vorschlag: `KERSEX/KERJAMI_Registry`. Es muss öffentlich
-  sein, weil der Launcher ohne Anmeldung arbeitet.
-- Die Adresse steht in `cmake/Branding.cmake` (`BRAND_REGISTRY_URL`) und zeigt bis zur
-  Entscheidung noch auf den Namen aus dem Auftrag.
-- Die Startdatei (`projects.json` ohne Projekte) und eine README mit Feldreferenz liegen in
-  `docs/registry/` und werden ins neue Repository kopiert. Die dort beschriebenen Prüfregeln sind
-  der Entwurf für Phase 2; ändern sie sich, wird die README mit angepasst.
-- **Betrifft:** Den echten Abruf in Phase 2 und die Launcher-Releases in Phase 6. Entwickelt und
-  getestet wird Phase 2 auch ohne das Repository.
+- **Entschieden (2026-11-11):** Die Projektliste ist Teil des Launchers und kommt mit seinen Updates
+  (D-43). Es gibt kein Registry-Repository, keine Registry-Adresse und keinen Abruf der Liste.
+- **Offen bleibt der Inhalt der Liste.** Jeder Eintrag braucht die Felder aus `docs/registry/README.md`,
+  darunter den Pfad der Startdatei im ZIP, und das Projekt ein ZIP-Release (E-07).
 
 ### E-05 Helles Theme
 
@@ -62,12 +55,13 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 
 - **Stand (2026-11-10):** Das Team will vorerst keine Dateien hochladen, nur Releases. Gemeint ist
   offenbar: kein Quelltext und keine Projektdateien in den Repositories, nur Release-Assets. Ob das
-  für das Launcher-Repository, das Registry-Repository oder beide gilt, ist noch zu bestätigen.
+  für das Launcher-Repository, das Registry-Repository oder beide gilt, ist noch zu bestätigen
+  (das Registry-Repository entfällt seit D-43).
   Bis dahin wird nichts hochgeladen.
 - **Nachtrag (2026-11-10):** Das Team hat nochmals darüber gesprochen und wünscht einen Commit des
   gesamten Stands, besonders von Plan und Stand der Doku. Das ist ein lokaler Commit. Ob und wohin
   gepusht wird, ist nicht entschieden; bis dahin wird nichts zu GitHub übertragen. Offen bleiben die
-  Fragen zur Registry (Datei im Repository oder Release-Asset) und zur Qt-Lizenz.
+  Frage zur Qt-Lizenz (die Registry ist erledigt, E-03).
 - **Folgen, wenn der Quelltext nicht veröffentlicht wird:**
   - Das Selbstupdate (Phase 6) braucht nur Releases mit ZIP-Asset und ist nicht betroffen.
   - Statisches Linken gegen Qt (E-01) wird zum Lizenzproblem: Die LGPL verlangt, dass Empfänger die
@@ -76,11 +70,8 @@ Antwort des Teams, bevor die genannte Phase beginnt.
     Qt-Lizenz. Das muss vor dem ersten Release geklärt werden (keine Rechtsberatung).
   - GitHub Actions (Phase 8) brauchen den Quelltext im Repository. Ohne ihn wird das Release lokal
     mit `package-portable.ps1` gebaut und von Hand hochgeladen.
-- **Folgen für die Registry:** Die Adresse `raw.githubusercontent.com/.../projects.json` setzt eine
-  Datei im Repository voraus. Alternative: `projects.json` als Release-Asset veröffentlichen und
-  `https://github.com/<Owner>/<Repository>/releases/latest/download/projects.json` verwenden. Der
-  Parser bleibt gleich, jede Änderung der Registry ist dann ein neues Release.
-- **Betrifft:** Phase 2 (Registry-Adresse), Phase 6, Phase 8.
+- **Folgen für die Registry:** keine mehr, die Liste steckt im Launcher (D-43).
+- **Betrifft:** Phase 6, Phase 8.
 
 ### E-07 Die echten Projekte des Teams und ihre Releases
 
@@ -99,23 +90,24 @@ Antwort des Teams, bevor die genannte Phase beginnt.
     erscheinen. Bei Tankstellenmeal sind außerdem `TankstellenmealV0.12` (nur zwei Zahlen) und
     `TankstellenmealV012.2` (führende Null, gehört zur Datei 0.12.1) auch ohne Präfix keine gültige Version.
   - **Dateiform:** Tankstellenmeal passt (ZIP, Digest, 395 MB liegen unter dem Limit von 2 GiB je Datei). KERS
-    Overlay passt nicht, weil es eine einzelne EXE ist (D-14). Ohne Release lässt sich nichts installieren.
+    Overlay war eine einzelne EXE (D-14) und geht seit D-44. Ohne Release lässt sich nichts installieren.
 - **Tags: gelöst** durch das optionale Registry-Feld `tag_prefix` (D-42). Mit `"tag_prefix":
   "TankstellenmealV"` und `"KERS_SubsystemsV"` erkennt der Launcher die Releases der beiden Projekte. Bei
   Tankstellenmeal bleiben `TankstellenmealV0.12` und `TankstellenmealV012.2` auch damit ungültig; die neueste
   Version `0.12.3` wird gefunden.
-- **Vorschlag zu Einzel-EXE-Releases:** KERS Overlay veröffentlicht künftig ein ZIP (eine EXE im ZIP genügt). Oder
-  eine spätere Version des Launchers bekommt einen Asset-Typ „exe“ (Prüfsumme ja, Archivprüfung entfällt).
+- **Einzel-EXE-Releases: gelöst** durch D-44. **KERS Overlay ist der erste Eintrag der Projektliste**
+  (`tag_prefix` `KERS_SubsystemsV`, Datei `KERS_Subsystems.exe`). Ein Live-Test gegen GitHub
+  (`LAUNCHER_LIVE_TESTS=1`, nur Metadaten) findet Version 0.3.1, 56,2 MiB, Prüfsumme vorhanden.
 - **Fehlt noch für einen echten Test von Tankstellenmeal:** der Pfad der Startdatei im ZIP (`executable`). Ihn
   kennt Amil oder das ZIP selbst; es wurde nicht geladen. Für die anderen vier Projekte braucht es zuerst ein
   Release mit ZIP.
-- **Betrifft:** Inhalt der Registry (E-03), echte Tests (E-02), Phase 7 (Projektseiten).
+- **Betrifft:** Inhalt der Projektliste (E-03, D-43), echte Tests (E-02), Phase 7 (Projektseiten).
 
 ## Getroffen
 
 ### D-01 Produktname nur in `cmake/Branding.cmake`
 
-Produktname, Anzeigename, EXE-Namen, GitHub-Koordinaten und Registry-URL stehen in einer Datei.
+Produktname, Anzeigename, EXE-Name und GitHub-Koordinaten stehen in einer Datei.
 Daraus entsteht `BrandingConfig.h`, die nur `Branding.cpp` einbindet. Bezeichner im Code sind
 neutral (`launcher::…`, Ziel `launcher`, Log-Kategorie `launcher.*`). Eine Umbenennung ändert
 eine Datei und kompiliert eine Übersetzungseinheit neu.
@@ -190,7 +182,6 @@ Schema Version 1:
     "schema_version": 1,
     "appearance": { "theme": "dark" },
     "startup": { "start_page": "dashboard" },
-    "registry": { "auto_check": true },
     "updates": { "check_interval_minutes": 60, "launcher_auto_check": true }
 }
 ```
@@ -230,7 +221,7 @@ Qt ändert den Wert einer Auswahlliste, wenn das Mausrad darüber gedreht wird. 
 Einstellungsseite würden so unbemerkt Einstellungen verstellt. `ui::ComboBox` ignoriert das
 Mausrad, die Seite scrollt weiter.
 
-### D-14 Projekte werden als ZIP veröffentlicht
+### D-14 Projekte werden als ZIP veröffentlicht (ergänzt durch D-44)
 
 Version 1 installiert Projekte aus ZIP-Assets, wie im Auftrag beschrieben. Einzelne EXE-Assets,
 wie sie KERS Overlay heute veröffentlicht, werden nicht unterstützt. Der Grund ist die
@@ -238,6 +229,9 @@ Installationskette (Archiv prüfen, in ein Staging-Verzeichnis entpacken, erwart
 kontrollieren), die für eine einzelne Datei nichts zu prüfen hätte. Die Entscheidung lässt sich
 später ändern: Das Registry-Schema (Phase 2) bekommt dafür ein erweiterbares Feld für den
 Asset-Typ.
+
+**Nachtrag 2026-11-11:** Das Team will, dass auch eine einzelne EXE als Release genügt (KERS Overlay). Das gilt
+seit D-44; ein Asset-Feld war dafür nicht nötig, die Dateiendung des Musters sagt es.
 
 ### D-15 Logo und Icons
 
@@ -261,7 +255,9 @@ Asset-Typ.
 ### D-16 Die Registry ist unbeglaubigte Eingabe
 
 Alles in `projects.json` wird wie Benutzereingabe behandelt. `RegistryParser` ist eine reine
-Funktion ohne Netzwerk und Dateizugriff, damit sich jede Regel direkt testen lässt.
+Funktion ohne Netzwerk und Dateizugriff, damit sich jede Regel direkt testen lässt. (Seit D-43 steckt die
+Datei im Programm. Die Prüfung bleibt: Ein Fehler in einem Eintrag kostet nur diesen Eintrag, und der Test
+der eingebauten Liste findet ihn vor dem Release.)
 
 - Ein Dokument mit kaputter Struktur wird als Ganzes abgelehnt: kein JSON, kein Objekt,
   `schema_version` fehlt oder ist kein positiver Ganzzahlwert, `projects` ist keine Liste, mehr als
@@ -279,7 +275,7 @@ Funktion ohne Netzwerk und Dateizugriff, damit sich jede Regel direkt testen lä
   Punkt und kein reservierter Windows-Name (`CON`, `NUL`, `COM1`, auch mit Endung wie `con.txt`).
 - `executable` ist ein relativer Pfad mit `/`, der auf `.exe` endet. Absolute Pfade, Laufwerke,
   `:`, `\`, `..`, leere Segmente und reservierte Namen sind verboten.
-- Unbekannte Felder werden ignoriert, damit die Registry wachsen kann.
+- Unbekannte Felder werden ignoriert, damit das Schema wachsen kann.
 - Die Prüfregeln stehen auch einzeln zur Verfügung (`isValidInstallDirectory` und andere). Der
   Installer prüft ein Projekt in Phase 4 damit noch einmal, bevor er das Dateisystem anfasst.
 
@@ -288,7 +284,7 @@ Die Feldreferenz für die Pflegenden steht in `docs/registry/README.md`.
 ### D-17 Netzwerkzugriff nur über den GitHubClient
 
 - **Policy statt Vertrauen:** Jede Anfrage und jeder Redirect wird gegen eine feste Liste geprüft:
-  nur HTTPS, nur fünf GitHub-Hosts, nur der Standardport, keine Zugangsdaten in der Adresse. Der
+  nur HTTPS, nur vier GitHub-Hosts, nur der Standardport, keine Zugangsdaten in der Adresse. Der
   Host muss exakt übereinstimmen (kein Präfix und kein Suffix).
 - Redirects folgt der Client selbst (`ManualRedirectPolicy`), damit jede Station geprüft werden
   kann. Höchstens fünf. Der `Location`-Header wird als Rohtext gelesen, weil Qt für relative
@@ -298,7 +294,7 @@ Die Feldreferenz für die Pflegenden steht in `docs/registry/README.md`.
 - **Rate Limit:** 429 sowie 403 mit `X-RateLimit-Remaining: 0` oder `Retry-After` gelten als
   „Limit erreicht“ und werden nicht wiederholt, denn jede Wiederholung verbraucht Budget. Das
   Budget aus den Headern ist über `GitHubClient::rateLimit()` abrufbar.
-- **Grenzen:** Timeout bei 15 s ohne Daten, Antworten der Registry höchstens 1 MiB, sonst 4 MiB.
+- **Grenzen:** Timeout bei 15 s ohne Daten, Antworten höchstens 4 MiB.
   Zu große Antworten werden schon während des Empfangs abgebrochen.
 - Jede Anfrage trägt `User-Agent: <Produkt>/<Version>` (GitHub verlangt einen), keine Cookies,
   keine Anmeldung. Der Header `X-GitHub-Api-Version` geht nur an `api.github.com`.
@@ -307,41 +303,28 @@ Die Feldreferenz für die Pflegenden steht in `docs/registry/README.md`.
 - Die Policy ist nur im Code austauschbar (Konstruktorparameter). Tests setzen damit einen Server
   auf dem eigenen Rechner ein. Keine Einstellung und keine Datei kann sie ändern.
 
-### D-18 Cache und Offline-Verhalten der Registry
+### D-18 Cache und Offline-Verhalten der Registry (entfallen)
 
-- Jede gültige Antwort wird als `cache/registry.json` gespeichert (atomar). Das Format:
-  `cache_schema`, `fetched_at`, `registry_url` und das Registry-Dokument selbst.
-- Beim Start liest `loadCache()` den Cache, noch bevor das Netzwerk antwortet. Ohne Verbindung
-  zeigt die Bibliothek also die letzte gültige Liste.
-- Der Cache wird beim Laden **erneut mit den Regeln dieser Version geprüft**. Er gilt als Daten von
-  der Festplatte, nicht als vertrauenswürdiges Ergebnis.
-- Ein Cache von einer anderen Adresse (zum Beispiel nach einer Umbenennung), mit unbekanntem
-  Layout oder ohne gültigen Zeitstempel wird ignoriert. Ein nicht lesbarer Cache wird als
-  `registry.corrupt-<Zeit>.json` beiseitegelegt.
-- Eine fehlgeschlagene Aktualisierung (keine Verbindung, HTTP-Fehler, Rate Limit, unbrauchbarer
-  Inhalt, zu neue Version) lässt die vorhandene Liste unverändert und überschreibt den Cache
-  nicht. Die Ursache steht in `problem()`.
-- Eine **gültige, aber leere** Registry ersetzt die Liste. Die Pflegenden können alle Projekte
-  zurückgezogen haben, und eine alte Liste würde das verbergen.
-- Kann der Cache nicht geschrieben werden, läuft alles weiter und es wird nur protokolliert.
+Entfallen mit D-43. Die Liste kommt nicht mehr aus dem Netz: Es gibt keinen Cache
+(`cache/registry.json`), keine Prüfung gegen eine Adresse und keinen Zustand „offline“ für die Liste.
+Die Bibliothek zeigt immer die Liste, die im Programm steckt.
 
-### D-19 Zeitplan der Registry-Abfrage
+### D-19 Zeitplan der Registry-Abfrage (entfallen)
 
-Beim Start (wenn „Registry automatisch prüfen“ an ist) und danach im „Prüfintervall“ der
-Einstellungen, also im selben Takt wie später die Projekt-Updates. Der Knopf „Aktualisieren“ in der
-Bibliothek funktioniert immer. Eine Änderung der Einstellung setzt den Timer neu, löst aber keine
-Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
+Entfallen mit D-43: kein Abruf beim Start, kein Prüfintervall für die Liste, kein Knopf „Aktualisieren“
+in der Bibliothek, keine Einstellung „Registry automatisch prüfen“. Das „Prüfintervall“ der Einstellungen
+gilt weiter für die Updates der Projekte und des Launchers.
 
 ### D-20 Bibliothek
 
 - Suche (Name, Beschreibung, Kategorie, Tags, ohne Beachtung der Groß- und Kleinschreibung),
   Kategorie, Tag und „Nur Empfohlene“ wirken zusammen. Empfohlene Projekte stehen zuerst, danach
   alphabetisch.
-- Die Filterlisten enthalten, was die Registry hergibt, ohne Doppelte und sortiert.
+- Die Filterlisten enthalten, was die Projektliste hergibt, ohne Doppelte und sortiert.
 - Tags erscheinen als Chips in einem Fluss-Layout, das bei wenig Platz umbricht.
-- Zustände: Laden, Liste, Liste mit Hinweis („Keine Verbindung … Angezeigt wird die gespeicherte
-  Liste vom …“), Fehlerkarte mit „Erneut versuchen“, leere Registry, keine Treffer mit „Filter
-  zurücksetzen“.
+- Zustände: Liste mit Anzahl („4 Projekte“), leere Liste („Noch keine Projekte freigegeben“), nicht lesbare
+  Liste (nur bei einem kaputten Build), keine Treffer mit „Filter zurücksetzen“. Seit D-43 gibt es kein
+  Laden, kein Offline und keinen Knopf „Aktualisieren“.
 - Installationsstatus, Versionen und Aktionen auf den Karten kommen mit den Phasen 3 bis 5, die
   Detailseite mit Phase 7.
 
@@ -847,6 +830,127 @@ als einfacher Weg für Tests und Werkzeuge.
 - **Grenzen:** Ein Präfix je Projekt. Wechselt ein Projekt später die Namensart seiner Tags, passt der Eintrag
   nur zu einer davon. Die Versionsnummer danach muss streng SemVer sein, `0.12` oder `012.2` werden übergangen.
 
+### D-43 Die Projektliste ist Teil des Programms
+
+- **Entscheidung des Teams (2026-11-11):** Die Liste der freigegebenen Projekte, die „Registry“, steckt im
+  Launcher. `resources/registry/projects.json` wird in die EXE einkompiliert (Qt-Ressource
+  `:/registry/projects.json`), und der `RegistryManager` liest sie beim Start (`loadBuiltIn()`). Es gibt kein
+  Registry-Repository, keine Registry-Adresse und keinen Abruf. D-18 und D-19 (Zwischenspeicher,
+  Offline-Verhalten, Zeitplan) entfallen. Ein neues Projekt kommt mit einem neuen Release des Launchers, das
+  das Selbstupdate (D-39 bis D-41) ausliefert.
+- **Vorteile:** Eine Quelle weniger, die ausfallen kann: kein 404, keine Frage nach dem Anfragebudget, kein
+  Zustand „offline“ für die Liste. Die Liste hat dieselbe Herkunft und dieselbe Prüfkette wie das Programm, und
+  es braucht kein weiteres öffentliches Repository mit Dateien (E-06).
+- **Kosten:** Auch ein einzelnes neues Projekt oder ein geänderter Pfad einer Startdatei braucht ein Release des
+  Launchers. Wer das Update nicht installiert, sieht die neue Liste nicht. Dafür steht jede Änderung der Liste
+  im Git-Verlauf.
+- **Prüfung bleibt:** Die Datei wird wie vorher mit allen Regeln gelesen (D-16). Der Test
+  `RegistryManagerTests::theBuiltInListIsInTheProgramAndValid` verlangt, dass kein Eintrag verworfen wird, und
+  `theBuiltInProjectsAreUsable` prüft jedes Feld noch einmal mit den Einzelregeln. Ein Fehler in der Liste
+  kommt so nicht in ein Release.
+- **Im Code:** `RegistryManager` hat `loadBuiltIn()` und `load(json)` (für Tests) und kein Netzwerk. Entfallen
+  sind: `BRAND_REGISTRY_URL` und `branding::registryUrl()`, `PathManager::registryCacheFile()`, die Einstellung
+  „Registry automatisch prüfen“ (`registry.auto_check`; ein solcher Eintrag in einer alten Einstellungsdatei
+  wird ignoriert), der Knopf „Aktualisieren“ und die Fehlerkarten der Bibliothek und der Host
+  `raw.githubusercontent.com` in der Netzwerk-Policy.
+- **Pflege:** Einen Eintrag ergänzen heißt `resources/registry/projects.json` ändern, bauen, testen, ein
+  Release des Launchers veröffentlichen. Die Felder stehen in `docs/registry/README.md`.
+- **Aktueller Inhalt: leer.** Für jeden Eintrag fehlen noch Angaben, die nur das Team kennt: der Pfad der
+  Startdatei im ZIP, bei vier Projekten auch ein ZIP-Release (E-07).
+
+### D-44 Einzel-EXE-Releases (ergänzt D-14)
+
+- **Entscheidung (2026-11-11):** Ein Projekt darf seine Release-Datei als einzelne `.exe` veröffentlichen, nicht
+  nur als ZIP, so wie KERS Overlay es tut. Das `asset_pattern` des Eintrags endet dann auf `.exe` (zum Beispiel
+  `KERS_Subsystems.exe`). Die Art der Datei ergibt sich allein aus der Endung (`RegistryParser::isSingleFileAsset`).
+- **`executable` ist dann ein Dateiname, kein Pfad:** der Name, unter dem das Programm installiert wird
+  (`Overlay.exe`). Ein `/` darin lässt den Eintrag durchfallen (Parser) und die Installation scheitern
+  (`InvalidProject`, Installer).
+- **Ablauf:** wie bei einem ZIP bis zur Prüfsumme, die Pflicht bleibt (D-28: Digest oder Prüfsummendatei, sonst
+  keine Installation). Statt der Archivprüfung gilt: Die Datei ist mindestens 64 Byte groß und beginnt mit der
+  Windows-Programmkennung `MZ`, sonst `InstallError::NotAProgram` („kein Windows-Programm“). Danach kopiert der
+  Installer sie als `<executable>` nach `temp/staging-<id>/` und geht dieselben Schritte wie sonst (D-30):
+  Sicherung der alten Version, Austausch, Eintragen, Rollback bei einem Fehler. Platz: Dateigröße plus 16 MiB.
+  Die Pfadlänge wird geprüft.
+- **Warum das reicht:** Ein ZIP braucht Archiv- und Pfadregeln, weil es Pfade enthält. Eine einzelne Datei hat
+  keine. Ihr Schutz ist die Prüfsumme. `MZ` ist keine Sicherheitsprüfung, es verhindert nur, dass etwas ganz
+  anderes (ein ZIP, eine Fehlerseite) als Programm abgelegt und später gestartet wird.
+- **Grenzen:** Ein Projekt aus mehreren Dateien braucht ein ZIP. Bei einem Update wird `current/` als Ganzes ersetzt
+  (D-30); was das Programm neben sich anlegt, liegt danach in der Sicherung. Der Launcher selbst erscheint weiter als
+  ZIP (D-39).
+- **Tests:** `InstallerTests` (frisch, Update mit Sicherung und Rollback, „kein Programm“ als Tabelle, Hash, Pfad als
+  `executable`), `InstallServiceTests` (die ganze Kette mit Präfix-Tag und Einzel-EXE), `RegistryTests`, und der
+  Live-Test gegen KERS Overlay.
+
+### D-45 Oberfläche: Detailseite, Dashboard, Speicher (Phase 7)
+
+- **Detailseite** (`ProjectDetailPage`): Sie steht nicht in der Seitenleiste. Man erreicht sie über „Details“ auf der
+  Projektkarte und im Dashboard; „← Zurück“ führt dorthin zurück, woher man kam, und die Seitenleiste behält die
+  Markierung der Herkunft. Sie zeigt Name, Kategorie, Beschreibung, Tags, die installierte und die neueste Version
+  (mit „Update verfügbar“ oder „aktuell“), Downloadgröße, Veröffentlichungsdatum, den Changelog (die Release-Notes
+  als Rohtext in einem schreibgeschützten Feld, D-22), die GitHub-Adresse („Auf GitHub öffnen“, aus Owner und
+  Repository des Eintrags gebaut) und dieselben Bedienelemente wie die Karte: Installieren, Starten, Aktualisieren,
+  Deinstallieren und „Updates: Manuell/Automatisch“. Karte und Seite teilen sich dafür ein Widget
+  (`ProjectControls`), damit sie sich nicht auseinanderentwickeln.
+- **Abfrage:** Beim Öffnen fragt die Seite GitHub, wenn sie für das Projekt in den letzten 10 Minuten nichts erhalten
+  hat (eine API-Anfrage, D-22). „Neu abfragen“ fragt immer. Ein Fehler steht im Klartext auf der Seite; Installieren
+  geht trotzdem, es fragt selbst.
+- **Dashboard:** Willkommen mit „Zur Bibliothek“; „Verfügbare Updates“ (installierte Projekte mit bekanntem Update:
+  „Version a → b · Zustand“); „Installierte Projekte“ (Starten, Details); „Zuletzt gestartet“ (die fünf jüngsten
+  Starts mit Zeit); „Empfohlene Projekte“ (höchstens vier, aus der Liste); der Launcher mit Version und
+  Update-Hinweis. Die Listen werden einmal neu gebaut, kurz nachdem sich etwas geändert hat. Ein Abschnitt ohne
+  Inhalt sagt, was fehlt; „Verfügbare Updates“ erscheint nur mit installierten Projekten, „Empfohlene Projekte“ nur,
+  wenn es welche gibt.
+- **Bibliothek:** Die Karte hat „Details“, und die Statuszeile sagt nach einer Prüfung „Installiert: Version 1.0.0 ·
+  aktuell“.
+- **Speicher** (Einstellungen → Speicherplatz, Cache-Verwaltung): zeigt, wie viel Platz Downloads und temporäre
+  Dateien und die Sicherungen früherer Versionen belegen. „Aufräumen“ leert `downloads/` und `temp/`, „Löschen“ die
+  Sicherungen aller Projekte (`library/*/backups/*`). Gemessen und gelöscht wird in einem Hintergrund-Thread, das
+  Fenster bleibt bedienbar. Beides fragt vorher; die Knöpfe sind gesperrt, solange ein Download, eine Installation
+  oder ein Launcher-Update läuft, denn in `temp/` liegt die Teildatei eines Downloads. Installierte Versionen werden
+  nie angefasst. Links und Junctions werden weder betreten noch gezählt: Der Test mit einer echten Junction fand,
+  dass `QDirIterator` Junctions folgt, deshalb läuft die Messung von Hand (`installer/Storage`).
+- **Entfallen:** „Automatische Registry-Prüfung“ (D-43). **Theme** (E-05) bleibt offen: Eine Auswahl mit einem einzigen
+  Eintrag hat keinen Nutzen. „Log-Verzeichnis öffnen“ gab es schon.
+- **Fehler und Ladezustände:** Karten und Detailseite zeigen Fortschritt und Fehler in Klartext (D-34, D-36), die
+  Bibliothek „leer“, „nicht lesbar“ und „keine Treffer“ (D-20), die Detailseite „wird abgefragt“ und den Grund eines
+  fehlgeschlagenen Abrufs.
+
+### D-46 Portable Release, Selbsttest und Paketprüfung (Phase 8)
+
+- **Paket:** `scripts/package-portable.ps1` baut `KERJAMI-<Version>-Windows-x64-Portable.zip` und
+  `….zip.sha256` (eine Zeile `<Hash>  <Name>`). Inhalt: `KERJAMI_Launcher.exe` und `update-manifest.json` (D-39).
+  Mit dem statischen Qt ist das alles. Bei einem geteilten Qt (ein Qt mit `Qt6Core.dll`) kopiert `windeployqt` die
+  Bibliotheken und Plugins daneben; dieser Zweig ist **nicht ausprobiert**, hier gibt es kein geteiltes Qt. Es gibt
+  keinen Installer und keine Konfigurationsvorlagen: Die Einstellungen entstehen beim ersten Start mit
+  Standardwerten. Die Version nimmt das Skript aus dem Programm selbst (`--self-test`), nicht aus einem zweiten Ort.
+- **Das ZIP schreibt .NET `ZipArchive`** mit `/` in den Namen. `Compress-Archive` aus Windows PowerShell 5.1 schreibt
+  Backslashes, die der strenge Leser des Launchers ablehnt (D-29).
+- **Zwei Betriebsarten des Programms ohne Fenster** (`app/SelfTest`): `--self-test <Ergebnis.json>` prüft das Programm
+  von innen: TLS-Backend (schannel), SHA-256 (Testvektor „abc“), zlib, die eingebauten Ressourcen (Style Sheet, Bilder,
+  Projektliste), die Projektliste ohne verworfene Einträge, ein anlegbarer und beschreibbarer Ordner, lesbare
+  Einstellungen. `--check-package --zip … --sha256 … --version … --work … --out …` lässt den Launcher ein Paket so
+  prüfen, wie sein Selbstupdate es täte (`UpdatePackage::prepare`, D-39). Exitcodes: 0 gut, 1 Prüfung fehlgeschlagen,
+  2 falsche Argumente.
+- **`scripts/verify-package.ps1`** prüft ein Paket von außen in einem frischen Temp-Ordner: Dateiname nach dem Muster,
+  Prüfsummendatei passt, Eintragsnamen sicher, das Manifest stimmt mit den Dateien überein (Größe, SHA-256, nichts
+  Unaufgeführtes), keine Entwicklungsreste (`.pdb`, Einstellungen, Logs, Sperren), **keine Spur des Erstellers**
+  (Benutzername, Profilordner, `\Users\` in keiner Datei), der Selbsttest besteht aus dem entpackten Ordner, das
+  Programm schreibt nur in die eigenen Ordner (nichts ins Benutzerprofil, nichts neben sich), und das Paket besteht
+  `--check-package`.
+- **`scripts/test-package.ps1`** (CTest `PackageTests`) baut ein Paket und macht sechs kaputte daraus: mit einer
+  Debug-Datei, einer nicht aufgeführten Datei, einer veränderten EXE, einem Manifest für eine andere Version, ohne
+  Manifest und mit einer EXE, die einen Benutzernamen enthält. Jede muss abgelehnt werden, und zwar aus dem
+  eingebauten Grund und nicht, weil die Prüfsummendatei fehlt. Eine Prüfung, die nicht „Nein“ sagen kann, ist nichts
+  wert.
+- **GitHub Actions** (`.github/workflows`): `ci.yml` baut und testet bei jedem Push, `release.yml` baut bei einem Tag
+  `v<Version>` das Paket, prüft es, vergleicht Tag und Programmversion und legt ein **Entwurf-Release** an.
+  **Beide sind noch nie gelaufen:** Sie bauen mit MSVC und einem geteilten Qt, hier gibt es nur llvm-mingw mit
+  statischem Qt (E-01). Beim ersten Lauf sind Anpassungen zu erwarten.
+- **Veröffentlichen ohne Actions:** `package-portable.ps1` ausführen und die beiden Dateien aus `dist/` von Hand als
+  Assets eines Release hochladen (`docs/04-veroeffentlichen.md`). Das passt zu E-06: Dafür muss kein Quelltext auf
+  GitHub liegen.
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch und löst Links und Junctions nicht auf. Die
@@ -869,9 +973,7 @@ als einfacher Weg für Tests und Werkzeuge.
 - Qt verwirft einen `border-radius`, der größer als die halbe Höhe des Elements ist, statt ihn zu
   kappen. Das Style Sheet hält die Radien der Chips deshalb bei 8 px.
 - Das Budget von 60 Anfragen pro Stunde ohne Anmeldung gilt für `api.github.com`, also für die
-  Release-Abfragen ab Phase 3. Der Abruf der Registry über `raw.githubusercontent.com` gehört nach
-  bisherigem Wissen nicht dazu, ist aber nicht belegt. Der Live-Test zeigt das Budget im Log an
-  (`LAUNCHER_LIVE_TESTS=1`); damit lässt sich prüfen, ob die Registry es verbraucht.
+  Release-Abfragen ab Phase 3. Der Live-Test zeigt das Budget im Log an (`LAUNCHER_LIVE_TESTS=1`).
 - Die Bibliothek baut bei jeder Änderung alle Karten neu. Bei der Obergrenze von 500 Projekten ist
   das unkritisch.
 - Von der Release-Liste eines Repositories werden die ersten 30 Einträge gelesen. Eine Seitenabfrage
@@ -936,3 +1038,16 @@ als einfacher Weg für Tests und Werkzeuge.
 - Ein Selbstupdate gegen ein echtes GitHub-Release ist noch nicht getestet (das Repository hat kein
   Release). Der Test `selfUpdateEndToEnd` fährt die ganze Kette mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus
   gegen einen lokalen Server, der GitHub nachbildet.
+- Die Workflows `ci.yml` und `release.yml` sind nie gelaufen. Ob der MSVC-Zweig von `CMakeLists.txt` baut, ob
+  `Qt6::ZlibPrivate` aus den offiziellen Qt-Paketen verfügbar ist und ob die UI-Tests mit einem geteilten Qt laufen
+  (`qt_import_plugins` für die Offscreen-Plattform), ist offen. Der Zweig für ein geteiltes Qt in
+  `package-portable.ps1` (windeployqt, TLS-Plugin) ebenfalls; `--self-test` würde ein fehlendes TLS-Plugin im Paket
+  sofort zeigen.
+- Das Paket enthält keine Lizenztexte von Qt und nichts, was die Pflichten der LGPL beim statischen Linken erfüllt
+  (E-01, E-06). Das muss vor dem ersten öffentlichen Release geklärt werden.
+- Die EXE ist nicht signiert. Windows SmartScreen kann vor einer neu heruntergeladenen, unsignierten Datei warnen,
+  und Virenscanner sind bei unsignierten Programmen misstrauischer (ein früherer Fehlalarm, D-40).
+- `PackageTests` braucht PowerShell und dauert etwa eine halbe Minute: Es entpackt und startet das Programm
+  siebenmal.
+- Die Version eines Release steht in `CMakeLists.txt` (`project(… VERSION …)`). Das Paketskript liest sie aus dem
+  gebauten Programm und verlangt `major.minor.patch`.

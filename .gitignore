@@ -11,3 +11,6 @@ CMakeUserPresets.json
 .idea/
 *.user
 *.suo
+
+# Release packages made by scripts/package-portable.ps1
+/dist/

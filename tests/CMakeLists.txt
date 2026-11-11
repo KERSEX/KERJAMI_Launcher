@@ -53,3 +53,14 @@ qt_import_plugins(UiSmokeTests INCLUDE Qt6::QOffscreenIntegrationPlugin)
 file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" LAUNCHER_SYSTEM_FONT_DIR)
 set_tests_properties(UiSmokeTests PROPERTIES ENVIRONMENT
     "QT_QPA_PLATFORM=offscreen;QT_QPA_FONTDIR=${LAUNCHER_SYSTEM_FONT_DIR};LAUNCHER_TEST_SCREENSHOT_DIR=${CMAKE_BINARY_DIR}/screenshots")
+
+# The packaging scripts (D-46): a package made from the built program passes the
+# verification, and broken packages are refused. It runs the real program from an
+# unpacked copy, so it needs the program built.
+find_program(LAUNCHER_POWERSHELL NAMES powershell pwsh)
+if(LAUNCHER_POWERSHELL)
+    add_test(NAME PackageTests
+        COMMAND "${LAUNCHER_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+            -File "${CMAKE_SOURCE_DIR}/scripts/test-package.ps1" -BinDir "$<TARGET_FILE_DIR:launcher>")
+    set_tests_properties(PackageTests PROPERTIES TIMEOUT 600)
+endif()

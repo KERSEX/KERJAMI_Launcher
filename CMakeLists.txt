@@ -89,6 +89,8 @@ launcher_target_defaults(launcher_base)
 # --- Core: everything without a user interface -------------------------------
 qt_add_library(launcher_core STATIC
     src/app/Branding.cpp
+    src/app/SelfTest.cpp
+    src/app/SelfTest.h
     src/app/Branding.h
     src/core/Format.cpp
     src/core/Format.h

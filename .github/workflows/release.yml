@@ -1,0 +1,56 @@
+# Builds the portable package and publishes it as a GitHub release.
+#
+# Start it by pushing a tag "v<major>.<minor>.<patch>" that matches the version in CMakeLists.txt
+# (for example v0.1.0). The workflow stops if the tag and the program's own version differ.
+#
+# NOT YET RUN. See the note in ci.yml: this builds with MSVC and a shared Qt, so the package then
+# contains the Qt libraries that windeployqt copies next to the program (scripts/package-portable.ps1).
+# The release is created as a draft: look at it, then publish it by hand.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Visual Studio environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR"
+          cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package and verify
+        run: ./scripts/package-portable.ps1 -SkipBuild -BinDir build/bin -OutputDir dist -QtDir $env:QT_ROOT_DIR
+
+      - name: The tag must name the program's version
+        run: |
+          $zip = Get-ChildItem dist -Filter '*-Windows-x64-Portable.zip' | Select-Object -First 1
+          if ($zip.Name -notmatch '-(\d+\.\d+\.\d+)-Windows') { throw "Unexpected file name $($zip.Name)" }
+          if ("v$($Matches[1])" -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME but the program is version $($Matches[1])" }
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -like '*-Windows-x64-Portable.zip*' } | ForEach-Object { $_.FullName }
+          gh release create $env:GITHUB_REF_NAME @files --draft --verify-tag --title "$env:GITHUB_REF_NAME" --generate-notes

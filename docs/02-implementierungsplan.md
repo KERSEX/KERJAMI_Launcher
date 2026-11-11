@@ -55,7 +55,7 @@ Regeln:
 │                                update-<Version>/ (entpacktes Launcher-Release),
 │                                updater-<Version>/ (die laufende Kopie des Launchers für den Austausch)
 ├── updater/                     Journal, Backups der ersetzten Programmdateien, Bericht, Sperre (Phase 6)
-├── cache/                       Registry-Cache, Release-Antworten
+├── cache/                       Release-Antworten
 └── logs/                        launcher.log, updater.log
 ```
 
@@ -70,7 +70,7 @@ In JSON-Dateien stehen nur Pfade relativ zum Programmordner
 namespace launcher::branding {          // Werte aus cmake/Branding.cmake
 QString productName();  QString displayName();  QString version();
 QString executableFileName();  QString updateAssetPattern();
-QString gitHubOwner();  QString launcherRepository();  QUrl registryUrl();
+QString gitHubOwner();  QString launcherRepository();
 }
 
 class PathManager {                     // Wertklasse, kein Singleton
@@ -87,7 +87,7 @@ class PathManager {                     // Wertklasse, kein Singleton
 class SettingsManager : public QObject {
     LoadResult load();                  // Loaded | CreatedDefaults | Migrated | Recovered…
     const LauncherSettings& settings() const;
-    bool setStartPage(StartPage);  bool setRegistryAutoCheck(bool);
+    bool setStartPage(StartPage);
     bool setLauncherUpdateAutoCheck(bool);  bool setUpdateCheckIntervalMinutes(int);
 signals:
     void settingsChanged();  void saveFailed(const QString& reason);
@@ -105,7 +105,7 @@ class Logger {                          // Qt-Message-Handler mit Rotation
 };
 ```
 
-### Phase 2 – Registry (umgesetzt)
+### Phase 2 – Registry (umgesetzt; seit D-43 eine eingebaute Liste)
 
 ```cpp
 struct Project {                        // models/Project.h, nur validierte Werte
@@ -118,7 +118,7 @@ struct Project {                        // models/Project.h, nur validierte Wert
 
 namespace RegistryParser {              // github/RegistryParser.h, reine Funktionen
 RegistryParseResult parse(const QByteArray& json);
-RegistryParseResult parse(const QJsonObject& root);    // auch für den Cache
+RegistryParseResult parse(const QJsonObject& root);
 bool isValidProjectId / isValidOwner / isValidRepository /
      isValidInstallDirectory / isValidAssetPattern / isValidExecutablePath(const QString&);
 }
@@ -135,23 +135,23 @@ class GitHubRequest : public QObject {  // eine laufende Anfrage, löscht sich s
 signals: void finished(const NetworkResult& result);   // genau einmal, nie vor get()
 };
 
-class RegistryManager : public QObject {
-    void loadCache();                   // beim Start, ohne Netzwerk
-    void refresh();                     // lädt, validiert, schreibt den Cache
-    void setAutoRefresh(bool enabled, int intervalMinutes);
-    const QList<Project>& projects() const;            // nur enabled
-    Source source() const;              // None | Network | Cache
-    Problem problem() const;            // None | Unreachable | RateLimited | Http |
-                                        // InvalidContent | UnsupportedVersion
-signals: void changed();  void refreshFinished(bool success);
+class RegistryManager : public QObject {   // D-43: die Liste steckt im Programm
+    bool loadBuiltIn();                 // liest :/registry/projects.json, beim Start
+    bool load(const QByteArray& json);  // Tests; ein unbrauchbares Dokument lässt die Liste, wie sie war
+    const QList<Project>& projects() const;            // nur enabled, in der Reihenfolge der Datei
+    const QList<RegistryIssue>& issues() const;        // verworfene Einträge mit Grund
+    QString error() const;              // warum das letzte Laden scheiterte
+signals: void changed();
 };
 ```
 
 Die Oberfläche (`LibraryPage`) kennt nur den `RegistryManager`. Sie zeigt die Liste mit Suche,
-Kategorie- und Tag-Filter und „Nur Empfohlene“, dazu Lade-, Offline- und Fehlerzustände.
+Kategorie- und Tag-Filter und „Nur Empfohlene“, dazu die Zustände leere Liste und keine Treffer.
+Die Datei der Liste ist `resources/registry/projects.json`; die Feldreferenz steht in
+[registry/README.md](registry/README.md).
 
-Erlaubte Hosts (`Policy::production()`): `raw.githubusercontent.com`, `api.github.com`,
-`github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, jeweils
+Erlaubte Hosts (`Policy::production()`): `api.github.com`, `github.com`,
+`objects.githubusercontent.com`, `release-assets.githubusercontent.com`, jeweils
 nur über HTTPS auf dem Standardport. Die Entscheidungen dazu stehen in
 [03-entscheidungen.md](03-entscheidungen.md), D-16 bis D-21.
 
@@ -372,10 +372,55 @@ Die Oberfläche zeigt den Stand auf dem Dashboard und in „Einstellungen → Ü
 (`ui/LauncherUpdatePanel`): „Nach Updates suchen“, „Aktualisieren“ mit Rückfrage, „Abbrechen“ und
 „Jetzt neu starten“ (nur wenn eine Installation den Neustart aufgehalten hat). Entscheidungen und Grenzen: [03-entscheidungen.md](03-entscheidungen.md), D-39 bis D-41.
 
-### Phase 7 und 8
+### Phase 7 – UI-Fertigstellung (umgesetzt)
 
-UI-Fertigstellung nach Abschnitt 11, danach Paketierung (`package-portable.ps1`,
-`verify-package.ps1`), GitHub Actions und Dokumentation.
+```cpp
+class ProjectControls : public QWidget {          // ui/, gemeinsam für Karte und Detailseite
+    ProjectControls(const Project&, const AppContext&, QWidget* parent);
+    void addLeadingButton(QPushButton*);          // Installieren/Starten/Aktualisieren/Deinstallieren,
+};                                                // Updates: Manuell/Automatisch, Status, Fortschritt, Fehler
+
+class ProjectDetailPage : public Page {           // nicht in der Seitenleiste
+    void showProject(const Project&);             // fragt GitHub, wenn 10 Minuten nichts bekannt ist
+signals: void backRequested();
+};
+class MainWindow { void showProject(const QString& projectId); };   // PageId::ProjectDetail
+
+namespace Storage {                               // installer/Storage.h
+    struct Usage { qint64 downloadsAndTemp, backups; };
+    Usage measure(const PathManager&, const std::atomic<bool>* cancel = nullptr);
+    bool clearDownloadsAndTemp(const PathManager&, QString* error = nullptr);
+    bool clearBackups(const PathManager&, QString* error = nullptr);
+}
+```
+
+`ui::AppContext` bekommt den `ReleaseManager` für die Detailseite. Das Dashboard zeigt Updates, installierte und
+zuletzt gestartete Projekte und die Empfehlungen der Liste. Die Einstellungen bekommen die Speicherverwaltung. Dazu
+kommt die Installation einer **einzelnen EXE als Release** (`RegistryParser::isSingleFileAsset`,
+`InstallError::NotAProgram`). Entscheidungen: [03-entscheidungen.md](03-entscheidungen.md), D-44 und D-45.
+
+### Phase 8 – Portable Release (umgesetzt)
+
+```
+scripts/package-portable.ps1   Bauen, Dateien zusammenstellen, Selbsttest, Manifest, ZIP, Prüfsumme, Prüfung
+scripts/verify-package.ps1     Prüfung eines Pakets von außen (12 Prüfungen), Exitcode 0 oder 1
+scripts/test-package.ps1       CTest PackageTests: gutes Paket besteht, sechs kaputte werden abgelehnt
+.github/workflows/ci.yml       Bauen und Testen bei jedem Push (nie gelaufen)
+.github/workflows/release.yml  Tag v<Version> → Paket → Entwurf-Release (nie gelaufen)
+docs/04-veroeffentlichen.md    Schritt für Schritt zum Release
+```
+
+```cpp
+class SelfTest {                                  // app/SelfTest.h, ohne Fenster, ohne Netzwerk
+    // KERJAMI_Launcher.exe --self-test <Ergebnis.json>
+    // KERJAMI_Launcher.exe --check-package --zip F --sha256 H --version V --work D --out Ergebnis.json
+    static bool isRequested(int argc, char* argv[]);
+    static int runProgram(int argc, char* argv[]);
+};
+```
+
+Das Paket ist `KERJAMI-<Version>-Windows-x64-Portable.zip` mit `KERJAMI_Launcher.exe` und `update-manifest.json`
+(mit dem statischen Qt) und `….zip.sha256`. Entscheidungen und offene Punkte: [03-entscheidungen.md](03-entscheidungen.md), D-46.
 
 ## Tests
 
@@ -387,18 +432,20 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration, Einstellungen pro Projekt | 1, 5 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite, Anzeige des Launcher-Updates | 1–6 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite, Anzeige des Launcher-Updates, Detailseite, Dashboard, Speicherverwaltung | 1–7 |
 | `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln, Tag-Präfix | 2, 6 |
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
-| `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
+| `RegistryManagerTests.cpp` | Die eingebaute Liste ist im Programm und gültig, Laden, unbrauchbare Dokumente lassen die Liste unverändert | 2, 6 |
 | `SemVerTests.cpp` | Gültige und ungültige Versionen, Reihenfolge nach der SemVer-Spezifikation | 3 |
 | `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, Prüfsummendatei, Tag-Präfix, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3–4, 6 |
 | `DownloadTests.cpp` | Tempo, Formatierung, Warteschlange, Abbruch, Größen- und Speicherfehler | 3 |
 | `SecurityTests.cpp` | SHA-256, Prüfsummendatei, ZIP-Leser (kaputte und feindliche Archive), Pfadregeln, Validator, Extraktor | 4 |
-| `InstallerTests.cpp` | Installation, Update mit Backup, Rollback, Deinstallation, Liste der Installationen, laufendes Programm, Links | 4 |
+| `InstallerTests.cpp` | Installation, Update mit Backup, Rollback, Deinstallation, Liste der Installationen, laufendes Programm, Links, einzelne EXE als Release | 4, 7 |
 | `InstallServiceTests.cpp` | Die ganze Kette gegen einen lokalen Server: Hash-Quellen, falsche Hashes, feindliche Archive, Abbruch | 4 |
 | `ProcessTests.cpp` | Start, Mehrfachstart, Ende und Exitcode, Programm von außen gestartet, Nachkommen außerhalb des Ordners, Threads (mit dem Hilfsprogramm `SleepyApp`) | 5 |
 | `UpdateTests.cpp` | Prüfung, manuell und automatisch, laufendes Projekt, Vormerkung, Fehler, Warteschlange, Modi je Projekt, Netzwerkfehler | 5 |
+| `StorageTests.cpp` | Größen von Downloads, temporären Dateien und Sicherungen, Aufräumen, nie durch einen Link | 7 |
+| `PackageTests` (`scripts/test-package.ps1`) | Paket bauen, von außen prüfen, sechs kaputte Pakete ablehnen | 8 |
 | `UpdateTransactionTests.cpp` | Manifest-Parser (Tabelle feindlicher Manifeste), Transaktion: Erfolg, Ablehnungen, Rollback bei jedem Schritt, Absturz nach jedem Schritt und `recover`, `UpdateStartup` | 6 |
 | `UpdaterTests.cpp` | Die echte `KERJAMI_Launcher.exe` im Modus `--apply-update` mit dem Hilfsprogramm `SleepyApp` als Launcher: Austausch, Warten auf das Prozessende, Ablehnung, Bericht, Neustart, Sperre | 6 |
 | `LauncherUpdateTests.cpp` | Prüfung und Zustände, feindliche Pakete, Abbruch, Busy, Übergabe an den Austausch, Selbstupdate von Anfang bis Ende gegen einen lokalen Server | 6 |
@@ -408,20 +455,22 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | Phase | Inhalt | Status |
 |---|---|---|
 | 1 | Grundgerüst | umgesetzt |
-| 2 | Registry | umgesetzt und gegen GitHub geprüft; die echte Registry fehlt noch (E-03), bis dahin zeigt die Bibliothek „nicht gefunden (HTTP 404)“ |
+| 2 | Registry | umgesetzt; seit D-43 steckt die Liste im Programm (kein Abruf, kein Cache). Sie ist noch leer, ihr Inhalt hängt an Angaben des Teams (E-07) |
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
 | 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; wie Phase 4 ohne Test gegen echte GitHub-Releases (E-02) |
 | 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Das Programm ist eine einzige Datei (D-40) |
-| 7 | UI-Fertigstellung | offen |
-| 8 | Portable Release | offen; braucht Entscheidung E-01 |
+| 7 | UI-Fertigstellung | umgesetzt: Detailseite, Dashboard, Speicherverwaltung, Einzel-EXE-Projekte; getestet mit Screenshots; das Theme bleibt dunkel (E-05) |
+| 8 | Portable Release | umgesetzt für das statische Qt (Paket, Prüfung, Selbsttest); GitHub Actions, MSVC und ein geteiltes Qt sind geschrieben, aber nie gelaufen; Lizenzhinweise und Signatur fehlen (E-01, D-46) |
 
 Offene Entscheidungen stehen in [03-entscheidungen.md](03-entscheidungen.md):
 
 - E-01 Compiler und Qt-Variante (auch wegen der Qt-Lizenz, E-06)
 - E-02 Testprojekt mit ZIP-Releases für den Test in Phase 4
-- E-03 Registry-Repository (Name, Datei im Repository oder Release-Asset)
 - E-05 Theme-Auswahl, E-06 Umfang der GitHub-Veröffentlichung
 
-Die Reihenfolge der Phasen steht fest. Phase 2 und 3 laufen gegen einen lokalen Testserver und
+Alle acht Phasen sind umgesetzt. Bis zu einem öffentlichen Release bleibt: E-01 entscheiden, die Lizenzhinweise
+klären, die Workflows einmal laufen lassen und die Einträge der Projektliste vervollständigen.
+
+Die Reihenfolge der Phasen stand fest. Phase 2 und 3 laufen gegen einen lokalen Testserver und
 hängen von keiner dieser Entscheidungen ab.

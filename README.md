@@ -14,9 +14,9 @@ vorläufig und steht nur in [cmake/Branding.cmake](cmake/Branding.cmake).
 
 ## Stand
 
-Die Phasen 1 bis 6 von 8 sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
-Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die Projekt-Registry mit
-Zwischenspeicher und Offline-Verhalten, die Auswahl der neuesten stabilen Version, die
+Alle acht Phasen sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, portable
+Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die in das Programm eingebaute
+Projektliste, die Auswahl der neuesten stabilen Version, die
 Download-Warteschlange mit Fortschritt und die Installation: SHA-256-Prüfung, ZIP-Prüfung und
 sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden in
 der Bibliothek installiert, gestartet und entfernt. Der Launcher erkennt laufende Projekte und
@@ -25,8 +25,14 @@ automatisch (wird installiert, sobald das Projekt geschlossen ist). Der Launcher
 selbst: Er lädt das neue Release, prüft es gegen Prüfsumme und Manifest und übergibt an eine Kopie
 seiner selbst (`KERJAMI_Launcher.exe --apply-update`), die die Programmdateien nach dem Beenden in einer
 Transaktion mit Backup und Rollback austauscht und den Launcher neu startet. Das Programm ist eine
-einzige Datei. Offen sind die UI-Fertigstellung (Phase 7) und das portable Release (Phase 8). Details
-stehen in [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
+einzige Datei. Projekte dürfen als ZIP oder als einzelne EXE veröffentlicht werden. Die Oberfläche hat ein
+Dashboard (Updates, installierte und zuletzt gestartete Projekte, Empfehlungen), eine Detailseite je Projekt
+(Version, Changelog, Download-Größe, GitHub-Link, alle Aktionen) und eine Speicherverwaltung. Ein Skript baut das
+portable Paket und prüft es von außen. Details stehen in
+[docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
+
+Noch nicht geklärt oder nie gelaufen: die Qt-Lizenz beim statischen Linken (E-01), die GitHub-Workflows, ein Build
+mit MSVC und geteiltem Qt, eine Signatur der EXE. Die Projektliste enthält erst KERS Overlay.
 
 ## Bauen
 
@@ -60,7 +66,7 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `LoggerTests` | Format, Rotation, Größenlimit, Pfad-Schwärzung |
 | `RegistryTests` | Registry-Parser: alle Prüfregeln für Einträge, Pfade und Namen |
 | `GitHubClientTests` | URL-Policy, Wiederholungen, Rate Limit, Größenlimit, Redirects |
-| `RegistryManagerTests` | Laden, Cache, Offline-Verhalten, beschädigter Cache |
+| `RegistryManagerTests` | Die eingebaute Projektliste ist im Programm und gültig, Laden, unbrauchbare Dokumente |
 | `SemVerTests` | Versionen lesen und vergleichen nach SemVer 2.0 |
 | `ReleaseTests` | Release-Antwort lesen, Datei wählen, Prüfsumme und Prüfsummendatei, ReleaseManager |
 | `DownloadTests` | Download-Warteschlange, Fortschritt, Abbruch, Größen- und Speicherfehler |
@@ -72,15 +78,29 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `UpdateTransactionTests` | Manifest-Parser, Austausch der Programmdateien mit Backup, Rollback, Absturz mittendrin und Wiederherstellung |
 | `UpdaterTests` | Die echte `KERJAMI_Launcher.exe` im Austausch-Modus: Austausch, Warten auf den Launcher, Ablehnung, Bericht, Neustart |
 | `LauncherUpdateTests` | Launcher-Update: Prüfung, feindliche Pakete, Abbruch, Übergabe, Selbstupdate von Anfang bis Ende |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten und Update-Anzeige, Downloads-Seite, Launcher-Update |
+| `StorageTests` | Größen und Aufräumen von Downloads, temporären Dateien und Sicherungen, nie durch einen Link |
+| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek, Detailseite, Dashboard, Speicherverwaltung, Downloads-Seite, Launcher-Update |
+| `PackageTests` | Das Paket-Skript: ein gutes Paket besteht die Prüfung, sechs kaputte werden abgelehnt |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in
-`build\release\screenshots` ab.
+`build\release\screenshots` ab. Der Test `PackageTests` startet das gebaute Programm aus einem entpackten Paket
+und braucht deshalb PowerShell.
+
+## Release bauen
+
+```powershell
+.\scripts\package-portable.ps1 -Test
+```
+
+Das Skript baut, testet, stellt `KERJAMI-<Version>-Windows-x64-Portable.zip` samt Prüfsummendatei in `dist\`
+zusammen und prüft das Paket von außen (Selbsttest des Programms, Manifest, keine Spur des Erstellers, der Launcher
+nimmt es als Update an). Den ganzen Weg bis zum Release beschreibt
+[docs/04-veroeffentlichen.md](docs/04-veroeffentlichen.md).
 
 ## Aufbau
 
 ```
-cmake/Branding.cmake   Produktname, EXE-Namen, GitHub-Koordinaten, Registry-URL
+cmake/Branding.cmake   Produktname, EXE-Name, GitHub-Koordinaten
 src/app/               Startsequenz und Branding
 src/core/              PathManager, SettingsManager, Logger, JSON-Dateien
 src/github/            GitHub-Client, Registry, Releases
@@ -92,9 +112,11 @@ src/updater/           Update-Prüfung der Projekte, Selbstupdate des Launchers,
 src/models/            Datentypen
 src/ui/                Hauptfenster, Seiten, Controls, Theme
 resources/images/      Logo und Icons (erzeugt aus logo-source.png)
+resources/registry/    Die Liste der freigegebenen Projekte (projects.json), in die EXE eingebaut
 resources/styles/      Style Sheet
 tests/                 Qt Test, über CTest
-scripts/               Build-Skript, Icon-Erzeugung
+scripts/               Build, Paket (package-portable, verify-package, test-package), Icon-Erzeugung
+.github/workflows/     CI und Release (noch nie gelaufen)
 docs/                  Bestandsaufnahme, Plan, Entscheidungen
 ```
 
@@ -107,7 +129,7 @@ library/      installierte Projekte
 downloads/    heruntergeladene Archive bis zur Installation
 temp/         Teil-Downloads, Staging, entfernte Projekte vor dem Löschen, Launcher-Update
 updater/      Journal, Backups und Bericht des Selbstupdates
-cache/        Registry- und Release-Cache
+cache/        Release-Cache
 logs/         Logdateien
 ```
 
@@ -129,4 +151,5 @@ werden eingecheckt. Details in [docs/03-entscheidungen.md](docs/03-entscheidunge
 - [Technische Bestandsaufnahme](docs/01-bestandsaufnahme.md)
 - [Implementierungsplan](docs/02-implementierungsplan.md)
 - [Entscheidungen](docs/03-entscheidungen.md)
-- [Vorlage für das Registry-Repository](docs/registry/README.md)
+- [Ein Release veröffentlichen](docs/04-veroeffentlichen.md)
+- [Die Projektliste und ihre Felder](docs/registry/README.md)

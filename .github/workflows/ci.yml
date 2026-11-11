@@ -1,0 +1,39 @@
+# Builds the launcher and runs the tests on every push and pull request.
+#
+# NOT YET RUN. The launcher is developed with llvm-mingw and a static Qt (docs/03-entscheidungen.md,
+# E-01); this workflow builds with MSVC and the shared Qt that install-qt-action provides, which
+# nobody has tried yet. Expect to adjust it on its first run. See docs/04-veroeffentlichen.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Visual Studio environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
