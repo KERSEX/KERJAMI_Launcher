@@ -8,6 +8,7 @@
 #include "core/PathManager.h"
 #include "downloads/DownloadManager.h"
 #include "github/GitHubClient.h"
+#include "github/RegistryManager.h"
 #include "github/ReleaseManager.h"
 #include "installer/InstallService.h"
 #include "installer/InstalledProjects.h"
@@ -18,6 +19,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -645,6 +647,105 @@ private slots:
         QVERIFY(!m_installed->contains(u"tool"_s));
         QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(library(u"Tool"_s)), 10000);
         QVERIFY(!m_service->lastFailure(u"tool"_s).isFailure());
+    }
+
+    /// The real thing, once: the first project of the built-in list is installed from GitHub and removed
+    /// again. It downloads the release file (about 56 MB), so it runs only when asked for with its own
+    /// switch, apart from LAUNCHER_LIVE_TESTS, which reads metadata only.
+    void liveInstallOfKersOverlay()
+    {
+        if (!qEnvironmentVariableIsSet("LAUNCHER_LIVE_DOWNLOAD_TESTS"))
+            QSKIP("Set LAUNCHER_LIVE_DOWNLOAD_TESTS=1 to download the release of KERS Overlay (about 56 MB) "
+                  "from GitHub, install it into a temporary folder and remove it again.");
+
+        // The project exactly as the list built into the program has it.
+        launcher::RegistryManager list;
+        QVERIFY(list.loadBuiltIn());
+        Project project;
+        for (const Project& candidate : list.projects()) {
+            if (candidate.id == u"kers-overlay"_s)
+                project = candidate;
+        }
+        QVERIFY2(!project.id.isEmpty(), "KERS Overlay is not in the built-in list");
+
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        PathManager paths(root.filePath(u"app"_s));
+        QVERIFY(QDir().mkpath(paths.root()));
+        QVERIFY(paths.prepare().ok());
+
+        // The production client: HTTPS to GitHub only, as in the application.
+        GitHubClient client(GitHubClient::Policy::production());
+        launcher::LibraryLayout layout(paths.libraryDir(), paths.tempDir());
+        InstalledProjects installed(paths.stateFile());
+        installed.load();
+        ReleaseManager releases(client);
+        DownloadManager downloads(client, paths.tempDir(), paths.downloadsDir());
+        launcher::Installer installer(layout, installed);
+        launcher::Uninstaller uninstaller(layout, installed);
+        InstallService service(client, releases, downloads, installer, uninstaller, installed, layout);
+
+        // Progress, so that a long download is visible in the log.
+        ProjectStatus::Stage lastStage = ProjectStatus::Stage::Idle;
+        connect(&service, &InstallService::statusChanged, this, [&] {
+            const ProjectStatus status = service.status(project.id);
+            if (status.stage != lastStage) {
+                lastStage = status.stage;
+                qInfo() << "Stage" << static_cast<int>(status.stage) << "of" << status.total << "bytes";
+            }
+        });
+
+        QElapsedTimer clock;
+        clock.start();
+        QSignalSpy finished(&service, &InstallService::installFinished);
+        service.install(project);
+        QVERIFY2(finished.wait(300000), "no end of the installation within five minutes");
+        const OperationFailure failure = service.lastFailure(project.id);
+        QVERIFY2(finished.first().at(1).toBool(),
+            qPrintable(
+                u"installation failed: kind %1, code %2, HTTP %3, %4"_s.arg(static_cast<int>(failure.kind))
+                    .arg(failure.code)
+                    .arg(failure.httpStatus)
+                    .arg(failure.detail)));
+
+        // What was installed: the version, the file, and that it is the file GitHub announced.
+        const std::optional<launcher::InstalledProject> record = installed.get(project.id);
+        QVERIFY(record.has_value());
+        QVERIFY(record->tag.startsWith(project.tagPrefix));
+        QCOMPARE(record->executable, project.executable);
+        const std::optional<launcher::ReleaseSelection> selection = releases.latest(project.id);
+        QVERIFY(selection.has_value());
+        QCOMPARE(record->version, selection->release.version.toString());
+
+        const QString exe = layout.executablePath(*record);
+        QVERIFY(QFileInfo::exists(exe));
+        QCOMPARE(QFileInfo(exe).size(), selection->asset.size);
+        QVERIFY2(!selection->asset.sha256.isEmpty(), "GitHub announced no digest");
+        QCOMPARE(launcher::HashVerifier::sha256File(exe), selection->asset.sha256);
+
+        // A Windows program: "MZ", and a "PE" header where the DOS header points to.
+        QFile file(exe);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray head = file.read(4096);
+        QVERIFY(head.startsWith("MZ"));
+        const int peOffset =
+            static_cast<unsigned char>(head.at(0x3C)) | (static_cast<unsigned char>(head.at(0x3D)) << 8);
+        QVERIFY(peOffset > 0 && peOffset + 4 <= head.size());
+        QCOMPARE(head.mid(peOffset, 4), QByteArray("PE\0\0", 4));
+        file.close();
+
+        // Nothing is left over: no download, no staging folder.
+        QVERIFY(QDir(paths.downloadsDir()).isEmpty());
+        QVERIFY2(QDir(paths.tempDir()).isEmpty(), qPrintable(QDir(paths.tempDir()).entryList().join(u',')));
+        qInfo() << "Installed" << record->version << "(" << QFileInfo(exe).size() << "bytes ) in"
+                << clock.elapsed() / 1000.0 << "seconds";
+
+        // And away again.
+        const launcher::UninstallResult removed = service.uninstall(project.id);
+        QVERIFY2(removed.ok(), qPrintable(removed.detail));
+        QVERIFY(!installed.contains(project.id));
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(layout.projectDir(project.installDirectory)), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(QDir(paths.tempDir()).isEmpty(), 20000);
     }
 
     void uninstallIsRefusedWhileInstalling()

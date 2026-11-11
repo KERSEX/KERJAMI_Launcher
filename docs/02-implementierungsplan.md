@@ -457,8 +457,8 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 1 | Grundgerüst | umgesetzt |
 | 2 | Registry | umgesetzt; seit D-43 steckt die Liste im Programm (kein Abruf, kein Cache). Sie ist noch leer, ihr Inhalt hängt an Angaben des Teams (E-07) |
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
-| 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
-| 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; wie Phase 4 ohne Test gegen echte GitHub-Releases (E-02) |
+| 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); echt gegen GitHub getestet ist die Installation einer einzelnen EXE (KERS Overlay, 2026-11-11); mit einem ZIP-Release fehlt der Test noch (E-02) |
+| 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; ein Update zwischen zwei echten Versionen ist nicht gegen GitHub getestet (E-02) |
 | 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Das Programm ist eine einzige Datei (D-40) |
 | 7 | UI-Fertigstellung | umgesetzt: Detailseite, Dashboard, Speicherverwaltung, Einzel-EXE-Projekte; getestet mit Screenshots; das Theme bleibt dunkel (E-05) |
 | 8 | Portable Release | umgesetzt für das statische Qt (Paket, Prüfung, Selbsttest); GitHub Actions, MSVC und ein geteiltes Qt sind geschrieben, aber nie gelaufen; Lizenzhinweise und Signatur fehlen (E-01, D-46) |

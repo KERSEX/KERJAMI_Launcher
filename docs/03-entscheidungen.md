@@ -35,6 +35,12 @@ Antwort des Teams, bevor die genannte Phase beginnt.
   werden können. Vorschlag: ein kleines Testprojekt, etwa `KERSEX/KERJAMI_TestProject`, dessen
   ZIP eine winzige EXE enthält.
 - **Bis dahin:** Alle Tests laufen gegen einen lokalen Server im Testprozess.
+- **Stand 2026-11-11:** KERS Overlay ist seit D-44 der erste Eintrag der Liste und dient als echtes
+  Testprojekt, allerdings mit einer **einzelnen EXE**, nicht mit einem ZIP. Mit Erlaubnis des Teams wurde die
+  ganze Installation einmal echt ausgeführt (`LAUNCHER_LIVE_DOWNLOAD_TESTS=1`, siehe die Bekannten Grenzen):
+  bestanden. **Nicht echt getestet** sind weiter: ein ZIP-Release (Archivprüfung und Entpacken gegen eine echte
+  Datei), ein Update von einer Version auf die nächste und das Selbstupdate des Launchers. Dafür bräuchte es
+  die Testprojekte von oben.
 - **Betrifft:** Phase 4 und 5 (echter Test). Phase 2 und 3 sind nicht blockiert.
 
 ### E-03 Registry-Repository (erledigt: es gibt keines)
@@ -980,11 +986,15 @@ als einfacher Weg für Tests und Werkzeuge.
   gibt es nicht.
 - Die Antwort der Release-Liste wird vollständig im Speicher gelesen (bis 4 MiB). Downloads dagegen
   werden direkt in die Datei geschrieben.
-- Der Live-Test der Release-Abfrage (`LAUNCHER_LIVE_TESTS=1`) liest die Release-Liste von
-  `nlohmann/json`, einem fremden öffentlichen Repository, und lädt keine Datei herunter. Es gibt
-  keinen Test, der eine echte Datei von GitHub lädt: Dafür fehlt noch das Testprojekt (E-02). Die
-  ganze Installationskette ist bisher nur gegen einen lokalen Server geprüft, der GitHub nachbildet
-  (Adressen, Digest-Feld, Weiterleitungen sind dort nachgestellt, nicht gemessen).
+- Es gibt zwei Live-Tests, beide laufen nie von allein. `LAUNCHER_LIVE_TESTS=1` liest nur Metadaten: die
+  Release-Liste von `nlohmann/json` und die von KERS Overlay, ohne eine Datei zu laden.
+  `LAUNCHER_LIVE_DOWNLOAD_TESTS=1` (`InstallServiceTests::liveInstallOfKersOverlay`) lädt die Release-Datei von
+  KERS Overlay, rund 56 MiB, installiert sie in einen temporären Ordner und entfernt sie wieder. Am 2026-11-11
+  lief er mit Erlaubnis des Teams: Release-Abfrage 460 ms, Weiterleitung von `github.com` zu
+  `release-assets.githubusercontent.com`, 58.974.720 Byte in 3,7 s, SHA-256 gegen den Digest von GitHub, gültiger
+  Windows-Programmkopf, Installation in 4,8 s, danach nichts übrig. Damit ist die Kette (Adressen, Digest-Feld,
+  Weiterleitung, Prüfsumme, Installation, Deinstallation) **für eine einzelne EXE** gegen echtes GitHub gemessen
+  und nicht mehr nur nachgestellt. Für ein ZIP, ein Update und das Selbstupdate gilt das weiter nicht (E-02).
 - Der Schutz vor dem Überschreiben eines laufenden Projekts beruht auf der Windows-Dateisperre: Die
   EXE eines laufenden Programms und jede geöffnete Datei in `current/` verhindern das Umbenennen
   des Ordners. Das ist getestet (Datei ohne Löschfreigabe offen halten). Ein Programm, das aus
