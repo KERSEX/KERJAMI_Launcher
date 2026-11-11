@@ -41,7 +41,7 @@ keinen eigenen Hashwert ausweist; mit beiden Dateien ist ein Release immer prüf
    ```
 
 3. **Auf einem sauberen Rechner ansehen**, am besten in der Windows-Sandbox oder auf einem Rechner ohne
-   Entwicklungsumgebung: ZIP entpacken, `KERJAMI_Launcher.exe` starten, die Bibliothek öffnen. Die Skripte zeigen,
+   Entwicklungsumgebung: ZIP entpacken, `KERJAMI_Launcher.exe` starten, den Store öffnen. Die Skripte zeigen,
    dass das Programm startfähig und portabel ist; ein Blick auf die Oberfläche ersetzen sie nicht.
 
 4. **Release anlegen** auf GitHub: Tag `v<Version>` (muss genau die Version des Programms nennen), die beiden
@@ -58,7 +58,7 @@ keinen eigenen Hashwert ausweist; mit beiden Dateien ist ein Release immer prüf
 Die Projektliste steckt im Launcher (D-43). Einen Eintrag ergänzt man in `resources/registry/projects.json`
 (Felder: [registry/README.md](registry/README.md)), baut und testet (`RegistryManagerTests` verlangt, dass kein
 Eintrag verworfen wird) und veröffentlicht ein neues Release des Launchers. Wer das Update installiert, sieht das
-Projekt in der Bibliothek.
+Projekt im Store.
 
 Voraussetzungen im Repository des Projekts: ein Release (kein Pre-Release), dessen Tag eine Version enthält
 (`v1.2.0`, oder mit `tag_prefix` etwa `KERS_SubsystemsV0.3.1`), und eine Datei, die zum `asset_pattern` passt:

@@ -2,8 +2,6 @@
 
 #include "installer/InstallService.h"
 #include "installer/InstalledProjects.h"
-#include "ui/FlowLayout.h"
-#include "ui/ProjectControls.h"
 #include "updater/ProjectUpdateManager.h"
 
 #include <QHBoxLayout>
@@ -14,18 +12,8 @@ using namespace Qt::StringLiterals;
 
 namespace launcher::ui {
 
-namespace {
-
-QLabel* createChip(const QString& text, const char* role, QWidget* parent)
-{
-    QLabel* chip = createLabel(text, role, parent);
-    chip->setAlignment(Qt::AlignCenter);
-    return chip;
-}
-
-} // namespace
-
-ProjectCard::ProjectCard(const Project& project, const AppContext& context, QWidget* parent)
+ProjectCard::ProjectCard(
+    const Project& project, const AppContext& context, ProjectControls::Mode mode, QWidget* parent)
     : Card(parent)
     , m_project(project)
     , m_context(context)
@@ -38,37 +26,21 @@ ProjectCard::ProjectCard(const Project& project, const AppContext& context, QWid
     QLabel* name = createLabel(project.name, "title", this);
     name->setObjectName("ProjectName");
     header->addWidget(name);
-    if (project.featured) {
-        QLabel* badge = createChip(tr("Empfohlen"), "badge", this);
-        badge->setObjectName("ProjectFeatured");
-        header->addWidget(badge);
-    }
-    m_updateBadge = createChip(QString(), "badge", this);
+    m_updateBadge = createLabel(QString(), "badge", this);
+    m_updateBadge->setAlignment(Qt::AlignCenter);
     m_updateBadge->setObjectName("ProjectUpdateBadge");
     header->addWidget(m_updateBadge);
     header->addStretch(1);
-    QLabel* category = createLabel(project.category, "secondary", this);
-    category->setObjectName("ProjectCategory");
-    header->addWidget(category);
     body()->addLayout(header);
 
-    QLabel* description = createLabel(project.description, "secondary", this);
-    description->setWordWrap(true);
-    body()->addWidget(description);
-
-    if (!project.tags.isEmpty()) {
-        auto* tags = new FlowLayout;
-        for (const QString& tag : project.tags)
-            tags->addWidget(createChip(tag, "chip", this));
-        body()->addLayout(tags);
+    auto* controls = new ProjectControls(project, context, mode, this);
+    if (mode == ProjectControls::Mode::Library) {
+        auto* details = new QPushButton(tr("Details"), this);
+        details->setObjectName("ProjectDetails");
+        details->setCursor(Qt::PointingHandCursor);
+        connect(details, &QPushButton::clicked, this, [this] { emit detailsRequested(m_project.id); });
+        controls->addLeadingButton(details);
     }
-
-    auto* controls = new ProjectControls(project, context, this);
-    auto* details = new QPushButton(tr("Details"), this);
-    details->setObjectName("ProjectDetails");
-    details->setCursor(Qt::PointingHandCursor);
-    connect(details, &QPushButton::clicked, this, [this] { emit detailsRequested(m_project.id); });
-    controls->addLeadingButton(details);
     body()->addWidget(controls);
 
     const auto refreshFor = [this](const QString& id) {

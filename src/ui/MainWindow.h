@@ -19,10 +19,11 @@ public:
     /// Pages in sidebar order. The values are indices into the page stack.
     enum class PageId {
         Dashboard,
+        Store,
         Library,
         Downloads,
         Settings,
-        ProjectDetail, ///< Not in the sidebar: opened from the library or the dashboard.
+        ProjectDetail, ///< Not in the sidebar: opened from the store, the library or the dashboard.
     };
 
     explicit MainWindow(const AppContext& context, QWidget* parent = nullptr);

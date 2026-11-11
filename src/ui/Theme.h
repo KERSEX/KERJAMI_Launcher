@@ -33,6 +33,7 @@ struct ThemePalette {
 /// Both fonts share these values.
 namespace Glyph {
 inline constexpr char16_t Home = 0xE80F;
+inline constexpr char16_t Store = 0xE719; // "Shop"
 inline constexpr char16_t Library = 0xE8F1;
 inline constexpr char16_t Download = 0xE896;
 inline constexpr char16_t Settings = 0xE713;

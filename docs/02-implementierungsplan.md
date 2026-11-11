@@ -145,8 +145,8 @@ signals: void changed();
 };
 ```
 
-Die Oberfläche (`LibraryPage`) kennt nur den `RegistryManager`. Sie zeigt die Liste mit Suche,
-Kategorie- und Tag-Filter und „Nur Empfohlene“, dazu die Zustände leere Liste und keine Treffer.
+Die Oberfläche (`StorePage`, seit D-48) kennt nur den `RegistryManager`. Sie zeigt die Liste als Kacheln
+mit Suche und Kategorie-Auswahl, dazu die Zustände leere Liste und keine Treffer.
 Die Datei der Liste ist `resources/registry/projects.json`; die Feldreferenz steht in
 [registry/README.md](registry/README.md).
 
@@ -263,8 +263,9 @@ signals: void statusChanged(id);  void installFinished(id, bool success);
 GitHub keinen Digest meldet und das Release genau eine passende Prüfsummendatei hat
 (`ReleaseParser::checksumAsset`).
 
-Die Projektkarte der Bibliothek zeigt Zustand, Fortschritt und Fehler und ruft den Dienst auf
-(`ui/ProjectCard`, Meldungstexte in `ui/OperationMessages`, Bestätigung in `ui/Dialogs`).
+Die Kachel im Store und die Karte der Bibliothek zeigen Zustand, Fortschritt und Fehler und rufen den
+Dienst auf (`ui/StoreTile`, `ui/ProjectCard`, Meldungstexte in `ui/OperationMessages`, Bestätigung in
+`ui/Dialogs`).
 
 Der Start räumt übrig gebliebene `staging-*` und `uninstall-*` aus `temp/` auf. Alle Entscheidungen
 und Grenzen stehen in [03-entscheidungen.md](03-entscheidungen.md), D-27 bis D-34.
@@ -375,8 +376,9 @@ Die Oberfläche zeigt den Stand auf dem Dashboard und in „Einstellungen → Ü
 ### Phase 7 – UI-Fertigstellung (umgesetzt)
 
 ```cpp
-class ProjectControls : public QWidget {          // ui/, gemeinsam für Karte und Detailseite
-    ProjectControls(const Project&, const AppContext&, QWidget* parent);
+class ProjectControls : public QWidget {          // ui/, gemeinsam für Kachel, Karte und Detailseite
+    enum class Mode { Full, Library, Store };     // wie viel davon ein Ort zeigt (D-48)
+    ProjectControls(const Project&, const AppContext&, Mode, QWidget* parent);
     void addLeadingButton(QPushButton*);          // Installieren/Starten/Aktualisieren/Deinstallieren,
 };                                                // Updates: Manuell/Automatisch, Status, Fortschritt, Fehler
 
@@ -394,8 +396,10 @@ namespace Storage {                               // installer/Storage.h
 }
 ```
 
-`ui::AppContext` bekommt den `ReleaseManager` für die Detailseite. Das Dashboard zeigt Updates, installierte und
-zuletzt gestartete Projekte und die Empfehlungen der Liste. Die Einstellungen bekommen die Speicherverwaltung. Dazu
+`ui::AppContext` bekommt den `ReleaseManager` für die Detailseite. Das Dashboard zeigt Updates und die Projekte,
+die zuletzt verwendet wurden. Die Einstellungen bekommen die Speicherverwaltung. Die Oberfläche wurde danach
+neu geordnet (D-48): **Store** (alles Installierbare, als Kacheln), **Bibliothek** (nur Installiertes), Dashboard
+und Detailseite. Dazu
 kommt die Installation einer **einzelnen EXE als Release** (`RegistryParser::isSingleFileAsset`,
 `InstallError::NotAProgram`) und das Feld **`keep`** im Registry-Eintrag, das Daten eines Projekts (Einstellungen)
 bei einem Update in die neue Version übernimmt (`FileOps::copyTree`, `InstallError::CarryOverFailed`).
@@ -434,7 +438,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `PortableTests.cpp` | Pfade, Verschieben, Schreibrechte | 1 |
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration, Einstellungen pro Projekt | 1, 5 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
-| `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite, Anzeige des Launcher-Updates, Detailseite, Dashboard, Speicherverwaltung | 1–7 |
+| `UiSmokeTests.cpp` | Navigation, Einstellungen, Store (Kacheln, Suche, Kategorien, kleinstes Fenster), Bibliothek (Karten, Update, läuft, Projekt außerhalb der Liste), Downloads-Seite, Anzeige des Launcher-Updates, Detailseite (Deinstallieren, Update-Modus), Dashboard, Speicherverwaltung | 1–7 |
 | `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln, Tag-Präfix | 2, 6 |
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Die eingebaute Liste ist im Programm und gültig, Laden, unbrauchbare Dokumente lassen die Liste unverändert | 2, 6 |
@@ -462,7 +466,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); echt gegen GitHub getestet ist die Installation einer einzelnen EXE (KERS Overlay, 2026-11-11); mit einem ZIP-Release fehlt der Test noch (E-02) |
 | 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; ein Update zwischen zwei echten Versionen ist nicht gegen GitHub getestet (E-02) |
 | 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Das Programm ist eine einzige Datei (D-40) |
-| 7 | UI-Fertigstellung | umgesetzt: Detailseite, Dashboard, Speicherverwaltung, Einzel-EXE-Projekte; getestet mit Screenshots; das Theme bleibt dunkel (E-05) |
+| 7 | UI-Fertigstellung | umgesetzt: Detailseite, Dashboard, Speicherverwaltung, Einzel-EXE-Projekte; danach neu geordnet in Store, Bibliothek und Dashboard (D-48); getestet mit Screenshots; das Theme bleibt dunkel (E-05) |
 | 8 | Portable Release | umgesetzt für das statische Qt (Paket, Prüfung, Selbsttest); GitHub Actions, MSVC und ein geteiltes Qt sind geschrieben, aber nie gelaufen; Lizenzhinweise und Signatur fehlen (E-01, D-46) |
 
 Offene Entscheidungen stehen in [03-entscheidungen.md](03-entscheidungen.md):

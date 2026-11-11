@@ -79,7 +79,7 @@ ein Eintrag unter anderem bei:
 - einem `tag_prefix`, der vorhanden, aber leer oder ungültig ist (fehlt das Feld, ist das in Ordnung),
 - ungültigen Zeichen in `owner` oder `repository`.
 
-Ein verworfener Eintrag erscheint nicht in der Bibliothek, und im Log (`launcher.registry`) steht der Grund.
+Ein verworfener Eintrag erscheint nicht im Store, und im Log (`launcher.registry`) steht der Grund.
 Ist die ganze Datei kein gültiges JSON oder hat sie eine unbekannte `schema_version`, ist die Liste leer. Beides
 fängt der Test `RegistryManagerTests` ab, bevor ein Release entsteht.
 

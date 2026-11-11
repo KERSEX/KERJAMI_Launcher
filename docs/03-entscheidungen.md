@@ -321,18 +321,17 @@ Entfallen mit D-43: kein Abruf beim Start, kein Prüfintervall für die Liste, k
 in der Bibliothek, keine Einstellung „Registry automatisch prüfen“. Das „Prüfintervall“ der Einstellungen
 gilt weiter für die Updates der Projekte und des Launchers.
 
-### D-20 Bibliothek
+### D-20 Liste der Projekte (seit D-48 der Store)
 
-- Suche (Name, Beschreibung, Kategorie, Tags, ohne Beachtung der Groß- und Kleinschreibung),
-  Kategorie, Tag und „Nur Empfohlene“ wirken zusammen. Empfohlene Projekte stehen zuerst, danach
-  alphabetisch.
-- Die Filterlisten enthalten, was die Projektliste hergibt, ohne Doppelte und sortiert.
-- Tags erscheinen als Chips in einem Fluss-Layout, das bei wenig Platz umbricht.
-- Zustände: Liste mit Anzahl („4 Projekte“), leere Liste („Noch keine Projekte freigegeben“), nicht lesbare
+Dies war die Bibliothek mit allen Projekten; seit D-48 ist es der **Store**. Was hier steht, gilt dort, mit den
+Änderungen aus D-48 (Kacheln, Kategorie-Auswahl statt Filterlisten, kein Tag-Filter, kein „Nur Empfohlene“).
+
+- Suche (Name, Beschreibung, Kategorie, Tags, ohne Beachtung der Groß- und Kleinschreibung) und Kategorie wirken
+  zusammen. Empfohlene Projekte stehen zuerst, danach alphabetisch.
+- Die Kategorien sind, was die Projektliste hergibt, ohne Doppelte und sortiert.
+- Zustände: Liste mit Anzahl („4 Projekte“), leere Liste („Noch keine Projekte im Store“), nicht lesbare
   Liste (nur bei einem kaputten Build), keine Treffer mit „Filter zurücksetzen“. Seit D-43 gibt es kein
   Laden, kein Offline und keinen Knopf „Aktualisieren“.
-- Installationsstatus, Versionen und Aktionen auf den Karten kommen mit den Phasen 3 bis 5, die
-  Detailseite mit Phase 7.
 
 ### D-21 Versionen und Tags
 
@@ -700,8 +699,8 @@ als einfacher Weg für Tests und Werkzeuge.
 - Ungültige IDs werden abgelehnt, höchstens 500 Einträge. Unbekannte Schlüssel in einem Eintrag und Einträge
   mit IDs, die dieses Programm nicht annimmt, bleiben beim Speichern erhalten.
 - Beim Deinstallieren wird der Eintrag entfernt, ein leerer Abschnitt nicht mitgeschrieben.
-- Die Wahl steht auf der Projektkarte der Bibliothek („Updates: Manuell / Automatisch“), nur bei
-  installierten Projekten. Die Projekt-Detailseite folgt in Phase 7.
+- Die Wahl steht auf der Detailseite des Projekts („Updates: Manuell / Automatisch“), nur bei installierten
+  Projekten (bis D-48 auch auf der Karte der Bibliothek).
 
 ### D-39 Launcher-Release: ZIP, Manifest und Prüfung (`UpdatePackage`, `UpdateManifest`)
 
@@ -902,14 +901,7 @@ als einfacher Weg für Tests und Werkzeuge.
 - **Abfrage:** Beim Öffnen fragt die Seite GitHub, wenn sie für das Projekt in den letzten 10 Minuten nichts erhalten
   hat (eine API-Anfrage, D-22). „Neu abfragen“ fragt immer. Ein Fehler steht im Klartext auf der Seite; Installieren
   geht trotzdem, es fragt selbst.
-- **Dashboard:** Willkommen mit „Zur Bibliothek“; „Verfügbare Updates“ (installierte Projekte mit bekanntem Update:
-  „Version a → b · Zustand“); „Installierte Projekte“ (Starten, Details); „Zuletzt gestartet“ (die fünf jüngsten
-  Starts mit Zeit); „Empfohlene Projekte“ (höchstens vier, aus der Liste); der Launcher mit Version und
-  Update-Hinweis. Die Listen werden einmal neu gebaut, kurz nachdem sich etwas geändert hat. Ein Abschnitt ohne
-  Inhalt sagt, was fehlt; „Verfügbare Updates“ erscheint nur mit installierten Projekten, „Empfohlene Projekte“ nur,
-  wenn es welche gibt.
-- **Bibliothek:** Die Karte hat „Details“, und die Statuszeile sagt nach einer Prüfung „Installiert: Version 1.0.0 ·
-  aktuell“.
+- **Dashboard und Bibliothek:** So gebaut, später neu geordnet; was gilt, steht in D-48.
 - **Speicher** (Einstellungen → Speicherplatz, Cache-Verwaltung): zeigt, wie viel Platz Downloads und temporäre
   Dateien und die Sicherungen früherer Versionen belegen. „Aufräumen“ leert `downloads/` und `temp/`, „Löschen“ die
   Sicherungen aller Projekte (`library/*/backups/*`). Gemessen und gelöscht wird in einem Hintergrund-Thread, das
@@ -1000,6 +992,46 @@ als einfacher Weg für Tests und Werkzeuge.
   Update ohne Änderung, Links werden nie verfolgt, Startdatei in `keep` wird abgelehnt) und `RegistryManagerTests`
   (jeder Eintrag der eingebauten Liste hat gültige Pfade).
 
+### D-48 Store, Bibliothek und Dashboard
+
+- **Anlass:** Die „Bibliothek“ zeigte alle Projekte der Liste, installierte und nicht installierte gemischt, jede als
+  hohe Karte mit Beschreibung, Tags, Kategorie und bis zu fünf Knöpfen. Das Dashboard wiederholte das Installierte
+  gleich dreimal (Updates, Installiert, Zuletzt gestartet) und zeigte noch Empfehlungen. Gewünscht war mehr
+  Übersicht, und das Herunterladbare sollte an einem eigenen Ort liegen, einer Art Store.
+- **Die Seitenleiste:** Dashboard, **Store**, Bibliothek, Downloads, Einstellungen. Ein Projekt wird im Store
+  gefunden und installiert, in der Bibliothek gestartet und aktualisiert und auf seiner Detailseite entfernt.
+- **Store (`StorePage`, `StoreTile`):** Alle Projekte der Liste als Kacheln in einem Raster (drei nebeneinander im
+  Standardfenster, zwei im kleinsten). Oben die Suche und eine Reihe Kategorie-Knöpfe („Alle“ und eine je Kategorie,
+  genau eine gewählt); gibt es höchstens eine Kategorie, entfällt die Reihe. Die Kachel zeigt Name, „Empfohlen“,
+  Kategorie, die Beschreibung auf drei Zeilen gekürzt und die Knöpfe „Details“ und „Installieren“; ein Klick auf die
+  Kachel öffnet die Detailseite. Ein installiertes Projekt zeigt „Installiert: Version x“ statt „Installieren“ (und
+  „Aktualisieren“, wenn es ein Update gibt). Läuft etwas oder ging etwas schief, wächst die Kachel, und die Kacheln
+  der Reihe wachsen mit (`FlowLayout::setEqualRowHeight`), die Knöpfe bleiben unten.
+  Der Filter nach Tags und „Nur Empfohlene“ entfallen: Tags findet die Suche, Empfohlene stehen oben. Weniger
+  Bedienelemente, dieselbe Auswahl.
+- **Bibliothek (`LibraryPage`, `ProjectCard`):** Nur Installiertes, je Projekt eine kurze Karte: Name, Hinweis
+  „Update x“, Version und Zustand, „Details“, „Aktualisieren“ und „Starten“. „Deinstallieren“ und „Updates:
+  Manuell/Automatisch“ stehen auf der Detailseite, nicht in der Liste. Ist nichts installiert, führt ein Knopf
+  „Zum Store“ weiter. **Ein Projekt, das nicht mehr in der Liste steht,** bleibt in der Bibliothek (Name: seine ID)
+  und trägt dann alle Bedienelemente selbst, einschließlich „Deinstallieren“, denn es hat keine Detailseite. Vorher
+  ließ es sich in der Oberfläche gar nicht mehr entfernen.
+- **Dashboard:** Willkommen mit „Zum Store“; „Updates“ (nur wenn es welche gibt: „Version a → b · Zustand“);
+  „Zuletzt verwendet“ (höchstens fünf installierte Projekte, das zuletzt gestartete zuerst, dann die nie gestarteten;
+  „Starten“, „Details“); der Launcher mit Version und Update-Hinweis. Abschnitte ohne Inhalt erscheinen nicht.
+  „Installierte Projekte“ und „Empfohlene Projekte“ entfallen: Das eine ist die Bibliothek, das andere der Store.
+- **Ein Baustein für drei Orte:** `ProjectControls` hat einen Modus (`Full`, `Library`, `Store`). `Full` ist die
+  Detailseite (und die Karte eines Projekts außerhalb der Liste), `Library` lässt Deinstallieren und den Update-Modus
+  weg, `Store` zeigt nur Installieren, Abbrechen und Aktualisieren, mit der Statuszeile über den Knöpfen. Die
+  Logik (was ein Klick auslöst) ist an allen Orten dieselbe.
+- **Nicht geändert:** Die Einstellung „Startseite“ kennt weiter Dashboard und Bibliothek. Downloads, Einstellungen
+  und die Detailseite sind unverändert; „Zurück“ führt zu dem Ort, von dem man kam.
+- **Name:** „Store“ steht an zwei Stellen (Seitenleiste, Seitentitel) und lässt sich dort in einem Wort ändern.
+- **Tests:** `UiSmokeTests` prüft den Store (Kacheln, Reihenfolge, Suche, Kategorien, keine Auswahl bei einer
+  Kategorie, Klick auf die Kachel, gleiche Höhe, kleinstes Fenster, Fehlerfall), die Bibliothek (leer, folgt
+  Installationen und Entfernungen, ein Start baut nichts neu, Projekt außerhalb der Liste), die Karten und die
+  Detailseite (Deinstallieren, Update-Modus) und das Dashboard. Screenshots: `store-*.png`, `library-*.png`,
+  `dashboard-*.png`.
+
 ## Bekannte Grenzen
 
 - `PathManager::isInside` vergleicht Pfade lexikalisch und löst Links und Junctions nicht auf. Die
@@ -1023,8 +1055,9 @@ als einfacher Weg für Tests und Werkzeuge.
   kappen. Das Style Sheet hält die Radien der Chips deshalb bei 8 px.
 - Das Budget von 60 Anfragen pro Stunde ohne Anmeldung gilt für `api.github.com`, also für die
   Release-Abfragen ab Phase 3. Der Live-Test zeigt das Budget im Log an (`LAUNCHER_LIVE_TESTS=1`).
-- Die Bibliothek baut bei jeder Änderung alle Karten neu. Bei der Obergrenze von 500 Projekten ist
-  das unkritisch.
+- Der Store baut seine Kacheln neu, wenn sich die Liste oder die Suche ändert, die Bibliothek ihre Karten, wenn
+  ein Projekt hinzukommt, verschwindet oder seinen Namen ändert. Bei der Obergrenze von 500 Projekten ist das
+  unkritisch; ein Start oder ein Update lässt die Karten in Ruhe.
 - Von der Release-Liste eines Repositories werden die ersten 30 Einträge gelesen. Eine Seitenabfrage
   gibt es nicht.
 - Die Antwort der Release-Liste wird vollständig im Speicher gelesen (bis 4 MiB). Downloads dagegen

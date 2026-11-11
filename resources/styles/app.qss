@@ -147,6 +147,33 @@ QPushButton[accent="true"]:pressed {
     border-color: @accentPressed;
 }
 
+/* Category choice in the store: a row of toggle buttons, one of them checked. */
+QPushButton[categoryChip="true"] {
+    background-color: @surface;
+    color: @textSecondary;
+    border: 1px solid @border;
+    border-radius: 14px;
+    padding: 5px 16px;
+    font-size: 13px;
+}
+
+QPushButton[categoryChip="true"]:hover {
+    color: @textPrimary;
+    border-color: @borderStrong;
+}
+
+QPushButton[categoryChip="true"]:checked {
+    background-color: @accentSoft;
+    color: @accent;
+    border-color: @accent;
+    font-weight: 600;
+}
+
+/* A project in the store; the whole tile opens its detail page. */
+QFrame#StoreTile:hover {
+    border-color: @borderStrong;
+}
+
 /* ---- Combo boxes -----------------------------------------------------------
  * The arrow is painted by ui::ComboBox; an empty drop-down keeps Qt from
  * drawing its native button there.

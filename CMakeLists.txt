@@ -183,6 +183,10 @@ qt_add_library(launcher_ui STATIC
     src/ui/ProjectDetailPage.h
     src/ui/SettingsPage.cpp
     src/ui/SettingsPage.h
+    src/ui/StorePage.cpp
+    src/ui/StorePage.h
+    src/ui/StoreTile.cpp
+    src/ui/StoreTile.h
     src/ui/Theme.cpp
     src/ui/Theme.h
 )

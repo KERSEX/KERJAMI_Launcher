@@ -19,6 +19,10 @@ public:
     QLayoutItem* itemAt(int index) const override;
     QLayoutItem* takeAt(int index) override;
 
+    /// With this on, every item of a row is as tall as the tallest of the row. Off by default:
+    /// chips are all of one height and keep their own.
+    void setEqualRowHeight(bool equal) { m_equalRowHeight = equal; }
+
     Qt::Orientations expandingDirections() const override { return {}; }
     bool hasHeightForWidth() const override { return true; }
     int heightForWidth(int width) const override;
@@ -33,6 +37,7 @@ private:
     QList<QLayoutItem*> m_items;
     int m_horizontalSpacing;
     int m_verticalSpacing;
+    bool m_equalRowHeight = false;
 };
 
 } // namespace launcher::ui

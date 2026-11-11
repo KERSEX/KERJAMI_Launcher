@@ -189,7 +189,8 @@ void ProjectDetailPage::rebuild()
     contentLayout()->addWidget(createLabel(tr("Aktionen"), "section", this));
     auto* actions = new Card(this);
     actions->setObjectName("DetailActions");
-    actions->body()->addWidget(new ProjectControls(m_project, m_context, actions));
+    actions->body()->addWidget(
+        new ProjectControls(m_project, m_context, ProjectControls::Mode::Full, actions));
     contentLayout()->addWidget(actions);
 
     // --- changelog ---

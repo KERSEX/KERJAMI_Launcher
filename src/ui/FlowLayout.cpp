@@ -64,24 +64,43 @@ int FlowLayout::doLayout(const QRect& rect, bool testOnly) const
     const QMargins margins = contentsMargins();
     const QRect area = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom());
 
+    struct Placed {
+        QLayoutItem* item;
+        QPoint position;
+        QSize size;
+    };
+    QList<Placed> row;
     int x = area.x();
     int y = area.y();
     int rowHeight = 0;
+
+    // The height of a row is known only when it is complete, so its items are placed then.
+    const auto placeRow = [&] {
+        if (!testOnly) {
+            for (const Placed& placed : std::as_const(row)) {
+                const int height = m_equalRowHeight ? rowHeight : placed.size.height();
+                placed.item->setGeometry(QRect(placed.position, QSize(placed.size.width(), height)));
+            }
+        }
+        row.clear();
+    };
+
     for (QLayoutItem* item : m_items) {
         if (item->isEmpty())
             continue;
         const QSize size = item->sizeHint();
         // Start a new row when the item does not fit, unless it is the first of its row.
         if (x > area.x() && x + size.width() > area.right() + 1) {
+            placeRow();
             x = area.x();
             y += rowHeight + m_verticalSpacing;
             rowHeight = 0;
         }
-        if (!testOnly)
-            item->setGeometry(QRect(QPoint(x, y), size));
+        row.append({item, QPoint(x, y), size});
         x += size.width() + m_horizontalSpacing;
         rowHeight = std::max(rowHeight, size.height());
     }
+    placeRow();
     return y + rowHeight - rect.y() + margins.bottom();
 }
 

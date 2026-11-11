@@ -26,6 +26,7 @@
 #include "ui/OperationMessages.h"
 #include "ui/ProjectCard.h"
 #include "ui/ProjectDetailPage.h"
+#include "ui/StoreTile.h"
 #include "ui/Theme.h"
 #include "updater/LauncherUpdateManager.h"
 #include "updater/ProjectUpdateManager.h"
@@ -60,6 +61,7 @@ using launcher::SettingsManager;
 using launcher::ui::ComboBox;
 using launcher::ui::ProjectCard;
 using launcher::ui::ProjectDetailPage;
+using launcher::ui::StoreTile;
 
 namespace {
 
@@ -105,6 +107,37 @@ QJsonArray sampleProjects()
     };
 }
 
+/// A record as the installer leaves it, with the file it describes.
+bool installFake(const launcher::LibraryLayout& layout, launcher::InstalledProjects& installed,
+    const QString& id, const QString& version)
+{
+    launcher::InstalledProject record;
+    record.projectId = id;
+    record.version = version;
+    record.tag = u"v"_s + version;
+    record.installDirectory = id;
+    record.executable = id + u".exe"_s;
+    record.installedAt = QDateTime::fromString(u"2026-11-10T12:00:00Z"_s, Qt::ISODate);
+
+    const QString exe = layout.executablePath(record);
+    QDir().mkpath(QFileInfo(exe).absolutePath());
+    QFile file(exe);
+    if (!file.open(QIODevice::WriteOnly) || file.write("MZ") != 2)
+        return false;
+    file.close();
+    return installed.upsert(record);
+}
+
+template <typename T> T* findIn(QWidget& parent, const char* name)
+{
+    return parent.findChild<T*>(QLatin1StringView(name));
+}
+
+ProjectDetailPage* detailPageOf(QWidget& window)
+{
+    return window.findChild<ProjectDetailPage*>();
+}
+
 } // namespace
 using launcher::StartPage;
 using launcher::ui::MainWindow;
@@ -122,24 +155,31 @@ private slots:
     void startsOnDashboard();
     void startPageSettingIsRespected();
     void sidebarSwitchesPages();
-    void dashboardLinksToLibrary();
+    void dashboardLinksToStore();
     void brandingComesFromConfiguration();
     void brandImagesAreEmbedded();
     void settingsControlsShowStoredValues();
     void settingsControlsPersistChanges();
     void rendersEveryPage();
 
-    void libraryExplainsThatThereAreNoProjects();
-    void libraryExplainsAnUnreadableList();
-    void libraryShowsTheProjectsOfTheList();
-    void libraryFiltersCombine();
+    void storeExplainsThatThereAreNoProjects();
+    void storeExplainsAnUnreadableList();
+    void storeShowsTheProjectsOfTheList();
+    void storeFiltersCombine();
+    void storeOffersNoChoiceOfCategoryWhenThereIsOnlyOne();
+    void storeTilesAreShortAndOpenTheirPage();
+    void storeTilesWrapInTheSmallestWindow();
+    void storeShowsTheListThatIsBuiltIn();
 
-    void cardOffersInstallationForANewProject();
-    void cardShowsAnInstalledProject();
-    void cardAsksBeforeUninstalling();
-    void cardShowsWhyInstallingFailed();
+    void libraryExplainsThatNothingIsInstalledAndFollowsInstallations();
+    void libraryStillListsAProjectThatLeftTheList();
+
+    void tileOffersInstallationForANewProject();
+    void tileAndCardShowAnInstalledProject();
+    void detailPageAsksBeforeUninstalling();
+    void tileShowsWhyInstallingFailed();
     void cardAnnouncesAnUpdateAndAsksBeforeStarting();
-    void cardLetsTheUserChooseTheUpdateMode();
+    void detailPageLetsTheUserChooseTheUpdateMode();
     void cardShowsARunningProjectAndAnUnexpectedEnd();
 
     void launcherUpdatePanelsFollowTheManager();
@@ -152,8 +192,8 @@ private slots:
     void detailPageExplainsAFailedLookupAndCanAskAgain();
     void detailPageDoesNotAskAgainForAFreshAnswer();
 
-    void dashboardListsInstalledProjectsUpdatesAndRecentStarts();
-    void dashboardWithoutProjectsSaysSo();
+    void dashboardListsUpdatesAndTheProjectsAtHand();
+    void dashboardWithoutProjectsPointsToTheStore();
     void dashboardStartsAProject();
     void dashboardOffersNoDetailsForAProjectThatLeftTheList();
 
@@ -189,13 +229,52 @@ private:
         return parent.findChild<T*>(QLatin1StringView(objectName));
     }
 
-    /// Ids of the project cards in the order they are shown.
-    static QStringList shownProjects(QWidget& window)
+    /// Ids of the tiles in the store, in the order they are shown.
+    static QStringList shownTiles(QWidget& window)
+    {
+        QStringList ids;
+        for (const StoreTile* tile : window.findChildren<StoreTile*>())
+            ids.append(tile->projectId());
+        return ids;
+    }
+
+    /// Ids of the cards in the library, in the order they are shown.
+    static QStringList shownCards(QWidget& window)
     {
         QStringList ids;
         for (const ProjectCard* card : window.findChildren<ProjectCard*>())
             ids.append(card->projectId());
         return ids;
+    }
+
+    /// The tile of a project in the store, or null.
+    static StoreTile* tileOf(QWidget& window, const QString& id)
+    {
+        for (StoreTile* tile : window.findChildren<StoreTile*>()) {
+            if (tile->projectId() == id)
+                return tile;
+        }
+        return nullptr;
+    }
+
+    /// The card of a project in the library, or null.
+    static ProjectCard* cardOf(QWidget& window, const QString& id)
+    {
+        for (ProjectCard* card : window.findChildren<ProjectCard*>()) {
+            if (card->projectId() == id)
+                return card;
+        }
+        return nullptr;
+    }
+
+    /// The category button with this text in the store.
+    static QAbstractButton* categoryChip(QWidget& window, const QString& text)
+    {
+        for (QAbstractButton* chip : window.findChildren<QAbstractButton*>(u"StoreCategory"_s)) {
+            if (chip->text() == text)
+                return chip;
+        }
+        return nullptr;
     }
 
     /// Selects an entry of a filter box the way a click on it would.
@@ -364,6 +443,7 @@ void UiSmokeTests::sidebarSwitchesPages()
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
     const QList<std::pair<const char*, PageId>> entries = {
+        {"NavStore", PageId::Store},
         {"NavLibrary", PageId::Library},
         {"NavDownloads", PageId::Downloads},
         {"NavSettings", PageId::Settings},
@@ -381,17 +461,17 @@ void UiSmokeTests::sidebarSwitchesPages()
     }
 }
 
-void UiSmokeTests::dashboardLinksToLibrary()
+void UiSmokeTests::dashboardLinksToStore()
 {
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
-    auto* button = find<QAbstractButton>(window, "OpenLibrary");
+    auto* button = find<QAbstractButton>(window, "OpenStore");
     QVERIFY(button);
     QTest::mouseClick(button, Qt::LeftButton);
-    QCOMPARE(window.currentPage(), PageId::Library);
-    QVERIFY(find<QAbstractButton>(window, "NavLibrary")->isChecked());
+    QCOMPARE(window.currentPage(), PageId::Store);
+    QVERIFY(find<QAbstractButton>(window, "NavStore")->isChecked());
 }
 
 void UiSmokeTests::brandingComesFromConfiguration()
@@ -489,6 +569,7 @@ void UiSmokeTests::rendersEveryPage()
 
     const QList<std::pair<PageId, QString>> pages = {
         {PageId::Dashboard, u"dashboard"_s},
+        {PageId::Store, u"store"_s},
         {PageId::Library, u"library"_s},
         {PageId::Downloads, u"downloads"_s},
         {PageId::Settings, u"settings"_s},
@@ -519,26 +600,26 @@ void UiSmokeTests::rendersEveryPage()
     }
 }
 
-void UiSmokeTests::libraryExplainsThatThereAreNoProjects()
+void UiSmokeTests::storeExplainsThatThereAreNoProjects()
 {
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
 
-    QVERIFY(shownProjects(window).isEmpty());
-    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().isEmpty());
+    QVERIFY(shownTiles(window).isEmpty());
+    QVERIFY(find<QLabel>(window, "StoreStatus")->text().isEmpty());
     bool explained = false;
     for (const QLabel* label : window.findChildren<QLabel*>())
-        explained = explained || label->text().contains(u"Noch keine Projekte freigegeben"_s);
+        explained = explained || label->text().contains(u"Noch keine Projekte im Store"_s);
     QVERIFY(explained);
     // Nothing is loaded from anywhere, so there is nothing to retry or refresh.
-    QVERIFY(window.findChild<QAbstractButton*>(u"LibraryRetry"_s) == nullptr);
-    QVERIFY(window.findChild<QAbstractButton*>(u"LibraryRefresh"_s) == nullptr);
-    saveScreenshot(window, u"library-empty"_s);
+    QVERIFY(window.findChild<QAbstractButton*>(u"StoreRetry"_s) == nullptr);
+    QVERIFY(window.findChild<QAbstractButton*>(u"StoreRefresh"_s) == nullptr);
+    saveScreenshot(window, u"store-empty"_s);
 }
 
-void UiSmokeTests::libraryExplainsAnUnreadableList()
+void UiSmokeTests::storeExplainsAnUnreadableList()
 {
     // The list is compiled in, so this is a broken build; the page still says something useful.
     QVERIFY(!m_registry->load("{ not json"));
@@ -546,16 +627,16 @@ void UiSmokeTests::libraryExplainsAnUnreadableList()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
 
-    QVERIFY(shownProjects(window).isEmpty());
+    QVERIFY(shownTiles(window).isEmpty());
     bool explained = false;
     for (const QLabel* label : window.findChildren<QLabel*>())
         explained = explained || label->text().contains(u"nicht lesbar"_s);
     QVERIFY(explained);
 }
 
-void UiSmokeTests::libraryShowsTheProjectsOfTheList()
+void UiSmokeTests::storeShowsTheProjectsOfTheList()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QCOMPARE(m_registry->projects().size(), 4);
@@ -563,80 +644,265 @@ void UiSmokeTests::libraryShowsTheProjectsOfTheList()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
     QTest::qWait(250);
 
     // Featured projects first, each group alphabetical.
-    QCOMPARE(shownProjects(window),
+    QCOMPARE(shownTiles(window),
         (QStringList {u"kers-overlay"_s, u"setup-sharing"_s, u"lap-timer"_s, u"pit-radio"_s}));
-    QCOMPARE(find<QLabel>(window, "LibraryStatus")->text(), u"4 Projekte"_s);
-    QVERIFY(find<QAbstractButton>(window, "LibraryRetry") == nullptr);
+    QCOMPARE(find<QLabel>(window, "StoreStatus")->text(), u"4 Projekte"_s);
+    QVERIFY(find<QAbstractButton>(window, "StoreRetry") == nullptr);
 
-    // Filter boxes list what the registry contains, once each and sorted.
-    auto* category = find<QComboBox>(window, "LibraryCategory");
+    // One button per category, each once and sorted; "Alle" comes first and is chosen.
     QStringList categories;
-    for (int i = 0; i < category->count(); ++i)
-        categories.append(category->itemText(i));
-    QCOMPARE(categories, (QStringList {u"Alle Kategorien"_s, u"Audio"_s, u"Community"_s, u"Tools"_s}));
+    QString chosen;
+    for (const QAbstractButton* chip : window.findChildren<QAbstractButton*>(u"StoreCategory"_s)) {
+        categories.append(chip->text());
+        if (chip->isChecked())
+            chosen = chip->text();
+    }
+    QCOMPARE(categories, (QStringList {u"Alle"_s, u"Audio"_s, u"Community"_s, u"Tools"_s}));
+    QCOMPARE(chosen, u"Alle"_s);
+    QVERIFY(find<QWidget>(window, "StoreCategories")->isVisibleTo(&window));
 
-    auto* tag = find<QComboBox>(window, "LibraryTag");
-    QCOMPARE(tag->count(), 1 + 6); // F1, Overlay, Setups, Sim Racing, Timing, Voice
-    QVERIFY(tag->findText(u"Overlay"_s) >= 0);
+    // The tile shows the name, the category and the featured badge; the tags are left to the detail page.
+    QCOMPARE(window.findChildren<QLabel*>(u"StoreTileFeatured"_s).size(), 2);
+    QCOMPARE(findIn<QLabel>(*tileOf(window, u"pit-radio"_s), "StoreTileCategory")->text(), u"Audio"_s);
+    QVERIFY(findIn<QLabel>(*tileOf(window, u"pit-radio"_s), "StoreTileDescription")
+            ->text()
+            .contains(u"Beispielprojekt"_s));
 
-    // The name, a tag chip and the featured badge are shown on the card.
-    QVERIFY(window.findChildren<QLabel*>(u"ProjectFeatured"_s).size() == 2);
+    // The tiles sit side by side, not in one long column: three fit in the content of this window.
+    const StoreTile* first = tileOf(window, u"kers-overlay"_s);
+    const StoreTile* second = tileOf(window, u"setup-sharing"_s);
+    QCOMPARE(first->width(), second->width());
+    QCOMPARE(first->height(), second->height());
+    QCOMPARE(first->mapTo(&window, QPoint(0, 0)).y(), second->mapTo(&window, QPoint(0, 0)).y());
+    QVERIFY(second->mapTo(&window, QPoint(0, 0)).x() > first->mapTo(&window, QPoint(0, 0)).x());
 
-    saveScreenshot(window, u"library-projects"_s);
+    saveScreenshot(window, u"store-projects"_s);
 }
 
-void UiSmokeTests::libraryFiltersCombine()
+void UiSmokeTests::storeFiltersCombine()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
 
-    auto* search = find<QLineEdit>(window, "LibrarySearch");
-    auto* category = find<QComboBox>(window, "LibraryCategory");
-    auto* tag = find<QComboBox>(window, "LibraryTag");
-    auto* featured = find<QAbstractButton>(window, "LibraryFeaturedOnly");
+    auto* search = find<QLineEdit>(window, "StoreSearch");
 
     // Search looks at name, description, category and tags, ignoring case.
     search->setText(u"OVERLAY"_s);
-    QCOMPARE(shownProjects(window), (QStringList {u"kers-overlay"_s, u"pit-radio"_s}));
+    QCOMPARE(shownTiles(window), (QStringList {u"kers-overlay"_s, u"pit-radio"_s}));
     search->setText(u"beispielprojekt"_s); // in every description
-    QCOMPARE(shownProjects(window).size(), 4);
+    QCOMPARE(shownTiles(window).size(), 4);
     search->setText(u"audio"_s); // a category
-    QCOMPARE(shownProjects(window), (QStringList {u"pit-radio"_s}));
+    QCOMPARE(shownTiles(window), (QStringList {u"pit-radio"_s}));
+    search->setText(u"timing"_s); // a tag
+    QCOMPARE(shownTiles(window), (QStringList {u"lap-timer"_s}));
+    QCOMPARE(find<QLabel>(window, "StoreStatus")->text(), u"1 Projekt"_s);
     search->clear();
-    QCOMPARE(shownProjects(window).size(), 4);
+    QCOMPARE(shownTiles(window).size(), 4);
 
-    choose(category, u"Tools"_s);
-    QCOMPARE(shownProjects(window), (QStringList {u"kers-overlay"_s, u"lap-timer"_s}));
+    // A category button narrows the list, and exactly one of them is chosen at a time.
+    categoryChip(window, u"Tools"_s)->click();
+    QCOMPARE(shownTiles(window), (QStringList {u"kers-overlay"_s, u"lap-timer"_s}));
+    QVERIFY(categoryChip(window, u"Tools"_s)->isChecked());
+    QVERIFY(!categoryChip(window, u"Alle"_s)->isChecked());
+    categoryChip(window, u"Audio"_s)->click();
+    QCOMPARE(shownTiles(window), (QStringList {u"pit-radio"_s}));
+    QVERIFY(!categoryChip(window, u"Tools"_s)->isChecked());
 
-    choose(tag, u"Sim Racing"_s);
-    QCOMPARE(shownProjects(window), (QStringList {u"kers-overlay"_s, u"lap-timer"_s}));
-    choose(tag, u"Timing"_s);
-    QCOMPARE(shownProjects(window), (QStringList {u"lap-timer"_s}));
-
-    // Filters add up: a featured-only list has nothing left in this combination.
-    featured->click();
-    QVERIFY(shownProjects(window).isEmpty());
-    auto* reset = find<QAbstractButton>(window, "LibraryResetFilters");
+    // The choices add up: nothing in "Tools" has to do with "voice".
+    categoryChip(window, u"Tools"_s)->click();
+    search->setText(u"voice"_s);
+    QVERIFY(shownTiles(window).isEmpty());
+    auto* reset = find<QAbstractButton>(window, "StoreResetFilters");
     QVERIFY(reset);
-    saveScreenshot(window, u"library-no-results"_s);
+    saveScreenshot(window, u"store-no-results"_s);
 
     // Resetting brings everything back and clears every control.
     reset->click();
-    QCOMPARE(shownProjects(window).size(), 4);
+    QCOMPARE(shownTiles(window).size(), 4);
     QVERIFY(search->text().isEmpty());
-    QCOMPARE(category->currentIndex(), 0);
-    QCOMPARE(tag->currentIndex(), 0);
-    QVERIFY(!featured->isChecked());
+    QVERIFY(categoryChip(window, u"Alle"_s)->isChecked());
+}
 
-    featured->click();
-    QCOMPARE(shownProjects(window), (QStringList {u"kers-overlay"_s, u"setup-sharing"_s}));
+void UiSmokeTests::storeOffersNoChoiceOfCategoryWhenThereIsOnlyOne()
+{
+    QVERIFY(loadProjects(
+        *m_registry, QJsonArray {sampleProjects().at(0), sampleProjects().at(1)})); // both in "Tools"
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Store);
+    QTest::qWait(250);
+
+    QCOMPARE(shownTiles(window).size(), 2);
+    QVERIFY(!find<QWidget>(window, "StoreCategories")->isVisibleTo(&window));
+
+    // A list with more categories brings the choice back.
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    QVERIFY(find<QWidget>(window, "StoreCategories")->isVisibleTo(&window));
+    QCOMPARE(shownTiles(window).size(), 4);
+}
+
+void UiSmokeTests::storeTilesAreShortAndOpenTheirPage()
+{
+    // A short text stays as it is; a long one is cut at a word and says so.
+    QCOMPARE(StoreTile::shortDescription(u"  Ein   kurzer\nText. "_s), u"Ein kurzer Text."_s);
+    const QString shortened = StoreTile::shortDescription(u"Wort "_s.repeated(60));
+    QVERIFY(shortened.endsWith(u"Wort…"_s));
+    QCOMPARE(shortened.size(), 21 * 5 + 4 + 1);
+
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Store);
+    QTest::qWait(250);
+
+    // A click on the tile itself opens the page of the project, once; so does its "Details" button.
+    StoreTile* tile = tileOf(window, u"lap-timer"_s);
+    QSignalSpy requested(tile, &StoreTile::detailsRequested);
+    QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, QPoint(tile->width() / 2, 6));
+    QCOMPARE(requested.size(), 1);
+    QCOMPARE(window.currentPage(), PageId::ProjectDetail);
+    QCOMPARE(detailPageOf(window)->projectId(), u"lap-timer"_s);
+    QVERIFY(find<QAbstractButton>(window, "NavStore")->isChecked()); // the page it came from stays marked
+
+    // "Zurück" leads back to the store.
+    findIn<QPushButton>(*detailPageOf(window), "DetailBack")->click();
+    QCOMPARE(window.currentPage(), PageId::Store);
+
+    findIn<QPushButton>(*tileOf(window, u"pit-radio"_s), "StoreTileDetails")->click();
+    QCOMPARE(window.currentPage(), PageId::ProjectDetail);
+    QCOMPARE(detailPageOf(window)->projectId(), u"pit-radio"_s);
+}
+
+void UiSmokeTests::storeTilesWrapInTheSmallestWindow()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    MainWindow window(context());
+    window.resize(window.minimumSize());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Store);
+    QTest::qWait(250);
+
+    // Two tiles side by side, the next one in the row below, and none of them is cut off at the right.
+    const auto position = [&window](
+                              const QString& id) { return tileOf(window, id)->mapTo(&window, QPoint(0, 0)); };
+    QCOMPARE(position(u"kers-overlay"_s).y(), position(u"setup-sharing"_s).y());
+    QVERIFY(position(u"lap-timer"_s).y() > position(u"kers-overlay"_s).y());
+    QCOMPARE(position(u"lap-timer"_s).x(), position(u"kers-overlay"_s).x());
+    for (const StoreTile* tile : window.findChildren<StoreTile*>())
+        QVERIFY(tile->mapTo(&window, QPoint(tile->width(), 0)).x() <= window.width());
+    saveScreenshot(window, u"store-narrow"_s);
+}
+
+void UiSmokeTests::storeShowsTheListThatIsBuiltIn()
+{
+    // What the program ships with, as the user sees it: one project today, so nothing to choose between.
+    QVERIFY2(m_registry->loadBuiltIn(), qPrintable(m_registry->error()));
+    QVERIFY(!m_registry->projects().isEmpty());
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Store);
+    QTest::qWait(250);
+
+    QCOMPARE(shownTiles(window).size(), m_registry->projects().size());
+    for (const launcher::Project& project : m_registry->projects()) {
+        StoreTile* tile = tileOf(window, project.id);
+        QVERIFY2(tile, qPrintable(project.id));
+        QCOMPARE(findIn<QPushButton>(*tile, "ProjectPrimary")->text(), u"Installieren"_s);
+    }
+    saveScreenshot(window, u"store-built-in"_s);
+}
+
+void UiSmokeTests::libraryExplainsThatNothingIsInstalledAndFollowsInstallations()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    // Nothing is installed: the page says so, and the way to the store is one click.
+    QVERIFY(shownCards(window).isEmpty());
+    QVERIFY(find<QLabel>(window, "LibraryStatus")->text().isEmpty());
+    bool explained = false;
+    for (const QLabel* label : window.findChildren<QLabel*>())
+        explained = explained || label->text().contains(u"Noch nichts installiert"_s);
+    QVERIFY(explained);
+    saveScreenshot(window, u"library-empty"_s);
+    find<QPushButton>(window, "LibraryOpenStore")->click();
+    QCOMPARE(window.currentPage(), PageId::Store);
+    window.showPage(PageId::Library);
+
+    // A finished installation shows up without a new window, in the order of the names.
+    QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"1.0.0"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(shownCards(window), (QStringList {u"pit-radio"_s}), 5000);
+    QCOMPARE(find<QLabel>(window, "LibraryStatus")->text(), u"1 Projekt installiert"_s);
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(shownCards(window), (QStringList {u"lap-timer"_s, u"pit-radio"_s}), 5000);
+    QCOMPARE(find<QLabel>(window, "LibraryStatus")->text(), u"2 Projekte installiert"_s);
+
+    // A project that is only updated or started does not rebuild the list: the cards stay.
+    const ProjectCard* before = cardOf(window, u"lap-timer"_s);
+    m_installed->recordStart(u"lap-timer"_s, QDateTime::currentDateTimeUtc());
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.5.0"_s));
+    QTest::qWait(100);
+    QCOMPARE(cardOf(window, u"lap-timer"_s), before);
+
+    // A removed project leaves the list.
+    QVERIFY(m_installed->remove(u"pit-radio"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(shownCards(window), (QStringList {u"lap-timer"_s}), 5000);
+}
+
+void UiSmokeTests::libraryStillListsAProjectThatLeftTheList()
+{
+    // "lap-timer" is installed but the list does not know it (any more); "pit-radio" is in the list.
+    QVERIFY(loadProjects(*m_registry, QJsonArray {sampleProjects().at(2)}));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"1.0.0"_s));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    // The name is the id, since the list has no name for it. It has no detail page to go to, so the
+    // card itself carries what the page would: removing the project and choosing how it is updated.
+    ProjectCard* gone = cardOf(window, u"lap-timer"_s);
+    ProjectCard* listed = cardOf(window, u"pit-radio"_s);
+    QVERIFY(gone && listed);
+    QCOMPARE(findIn<QLabel>(*gone, "ProjectName")->text(), u"lap-timer"_s);
+    QVERIFY(findIn<QPushButton>(*gone, "ProjectDetails") == nullptr);
+    QVERIFY(findIn<QPushButton>(*gone, "ProjectUninstall")->isVisible());
+    QVERIFY(findIn<ComboBox>(*gone, "ProjectUpdateMode")->isVisible());
+    QCOMPARE(findIn<QPushButton>(*gone, "ProjectPrimary")->text(), u"Starten"_s);
+
+    // A project of the list keeps its card short.
+    QVERIFY(findIn<QPushButton>(*listed, "ProjectDetails") != nullptr);
+    QVERIFY(!findIn<QPushButton>(*listed, "ProjectUninstall")->isVisible());
+    QVERIFY(!findIn<ComboBox>(*listed, "ProjectUpdateMode")->isVisible());
+
+    // Removing works from the card, with the usual question.
+    launcher::ui::Dialogs::setUninstallConfirmationForTests([](const launcher::Project&) { return true; });
+    findIn<QPushButton>(*gone, "ProjectUninstall")->click();
+    launcher::ui::Dialogs::setUninstallConfirmationForTests({});
+    QVERIFY(!m_installed->contains(u"lap-timer"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(shownCards(window), (QStringList {u"pit-radio"_s}), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(m_paths->libraryDir() + u"/lap-timer"_s), 10000);
 }
 
 void UiSmokeTests::downloadsPageStartsEmpty()
@@ -746,58 +1012,30 @@ void UiSmokeTests::downloadsPageClearsTheHistory()
 
 // ---- Project cards ------------------------------------------------------------------
 
-namespace {
-
-/// A record as the installer leaves it, with the file it describes.
-bool installFake(const launcher::LibraryLayout& layout, launcher::InstalledProjects& installed,
-    const QString& id, const QString& version)
-{
-    launcher::InstalledProject record;
-    record.projectId = id;
-    record.version = version;
-    record.tag = u"v"_s + version;
-    record.installDirectory = id;
-    record.executable = id + u".exe"_s;
-    record.installedAt = QDateTime::fromString(u"2026-11-10T12:00:00Z"_s, Qt::ISODate);
-
-    const QString exe = layout.executablePath(record);
-    QDir().mkpath(QFileInfo(exe).absolutePath());
-    QFile file(exe);
-    if (!file.open(QIODevice::WriteOnly) || file.write("MZ") != 2)
-        return false;
-    file.close();
-    return installed.upsert(record);
-}
-
-template <typename T> T* findIn(QWidget& parent, const char* name)
-{
-    return parent.findChild<T*>(QLatin1StringView(name));
-}
-
-} // namespace
-
-void UiSmokeTests::cardOffersInstallationForANewProject()
+void UiSmokeTests::tileOffersInstallationForANewProject()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
 
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
     QTest::qWait(250);
 
-    auto* card = window.findChildren<ProjectCard*>().first();
-    auto* primary = findIn<QPushButton>(*card, "ProjectPrimary");
+    StoreTile* tile = tileOf(window, u"kers-overlay"_s);
+    auto* primary = findIn<QPushButton>(*tile, "ProjectPrimary");
     QVERIFY(primary);
     QCOMPARE(primary->text(), u"Installieren"_s);
     QVERIFY(primary->isEnabled());
-    QCOMPARE(findIn<QLabel>(*card, "ProjectState")->text(), u"Nicht installiert"_s);
-    QVERIFY(!findIn<QPushButton>(*card, "ProjectUninstall")->isVisible());
-    QVERIFY(!findIn<QProgressBar>(*card, "ProjectProgress")->isVisible());
-    QVERIFY(!findIn<QLabel>(*card, "ProjectProblem")->isVisible());
+    // Nothing to say besides the button, and nothing that does not belong to the store.
+    QVERIFY(!findIn<QLabel>(*tile, "ProjectState")->isVisible());
+    QVERIFY(!findIn<QPushButton>(*tile, "ProjectUninstall")->isVisible());
+    QVERIFY(!findIn<ComboBox>(*tile, "ProjectUpdateMode")->isVisible());
+    QVERIFY(!findIn<QProgressBar>(*tile, "ProjectProgress")->isVisible());
+    QVERIFY(!findIn<QLabel>(*tile, "ProjectProblem")->isVisible());
 }
 
-void UiSmokeTests::cardShowsAnInstalledProject()
+void UiSmokeTests::tileAndCardShowAnInstalledProject()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
@@ -805,29 +1043,38 @@ void UiSmokeTests::cardShowsAnInstalledProject()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
     QTest::qWait(250);
 
-    ProjectCard* installedCard = nullptr;
-    ProjectCard* freshCard = nullptr;
-    for (ProjectCard* card : window.findChildren<ProjectCard*>())
-        (card->projectId() == u"lap-timer"_s ? installedCard : freshCard) = card;
-    QVERIFY(installedCard && freshCard);
-
-    QCOMPARE(findIn<QPushButton>(*installedCard, "ProjectPrimary")->text(), u"Starten"_s);
-    QCOMPARE(findIn<QLabel>(*installedCard, "ProjectState")->text(), u"Installiert: Version 1.4.2"_s);
-    QVERIFY(findIn<QPushButton>(*installedCard, "ProjectUninstall")->isVisible());
-    // The other cards are not affected.
-    QCOMPARE(findIn<QPushButton>(*freshCard, "ProjectPrimary")->text(), u"Installieren"_s);
-
-    saveScreenshot(window, u"library-installed"_s);
+    // In the store an installed project says so and offers nothing to install or start.
+    StoreTile* installedTile = tileOf(window, u"lap-timer"_s);
+    StoreTile* freshTile = tileOf(window, u"pit-radio"_s);
+    QVERIFY(installedTile && freshTile);
+    QVERIFY(!findIn<QPushButton>(*installedTile, "ProjectPrimary")->isVisible());
+    QVERIFY(findIn<QLabel>(*installedTile, "ProjectState")->isVisible());
+    QCOMPARE(findIn<QLabel>(*installedTile, "ProjectState")->text(), u"Installiert: Version 1.4.2"_s);
+    QCOMPARE(findIn<QPushButton>(*freshTile, "ProjectPrimary")->text(), u"Installieren"_s); // not affected
+    saveScreenshot(window, u"store-installed"_s);
 
     // A change made elsewhere (a finished installation) shows up without rebuilding the page.
-    QVERIFY(installFake(*m_layout, *m_installed, freshCard->projectId(), u"2.0.0"_s));
-    QCOMPARE(findIn<QPushButton>(*freshCard, "ProjectPrimary")->text(), u"Starten"_s);
+    QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"2.0.0"_s));
+    QVERIFY(!findIn<QPushButton>(*freshTile, "ProjectPrimary")->isVisible());
+    QCOMPARE(findIn<QLabel>(*freshTile, "ProjectState")->text(), u"Installiert: Version 2.0.0"_s);
+
+    // In the library the same project can be started, and nothing more than that and an update.
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+    ProjectCard* card = cardOf(window, u"lap-timer"_s);
+    QVERIFY(card);
+    QCOMPARE(findIn<QPushButton>(*card, "ProjectPrimary")->text(), u"Starten"_s);
+    QCOMPARE(findIn<QLabel>(*card, "ProjectState")->text(), u"Installiert: Version 1.4.2"_s);
+    QVERIFY(!findIn<QPushButton>(*card, "ProjectUninstall")->isVisible());
+    QVERIFY(!findIn<ComboBox>(*card, "ProjectUpdateMode")->isVisible());
+    QVERIFY(!findIn<QPushButton>(*card, "ProjectUpdate")->isVisible());
+    saveScreenshot(window, u"library-installed"_s);
 }
 
-void UiSmokeTests::cardAsksBeforeUninstalling()
+void UiSmokeTests::detailPageAsksBeforeUninstalling()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
@@ -835,16 +1082,11 @@ void UiSmokeTests::cardAsksBeforeUninstalling()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
-    QTest::qWait(250);
-
-    ProjectCard* card = nullptr;
-    for (ProjectCard* candidate : window.findChildren<ProjectCard*>()) {
-        if (candidate->projectId() == u"lap-timer"_s)
-            card = candidate;
-    }
-    QVERIFY(card);
-    auto* remove = findIn<QPushButton>(*card, "ProjectUninstall");
+    window.showProject(u"lap-timer"_s);
+    ProjectDetailPage* detail = detailPageOf(window);
+    QVERIFY(detail);
+    auto* remove = findIn<QPushButton>(*detail, "ProjectUninstall");
+    QVERIFY(remove && remove->isVisible());
 
     // "No": nothing is touched.
     QString asked;
@@ -857,46 +1099,53 @@ void UiSmokeTests::cardAsksBeforeUninstalling()
     QVERIFY(m_installed->contains(u"lap-timer"_s));
     QVERIFY(QFileInfo::exists(m_paths->libraryDir() + u"/lap-timer/current/lap-timer.exe"_s));
 
-    // "Yes": the project is removed and the card offers installation again.
+    // "Yes": the project is removed and the page offers installation again.
     launcher::ui::Dialogs::setUninstallConfirmationForTests([](const launcher::Project&) { return true; });
     remove->click();
     launcher::ui::Dialogs::setUninstallConfirmationForTests({});
 
     QVERIFY(!m_installed->contains(u"lap-timer"_s));
-    QCOMPARE(findIn<QPushButton>(*card, "ProjectPrimary")->text(), u"Installieren"_s);
-    QVERIFY(!findIn<QPushButton>(*card, "ProjectUninstall")->isVisible());
+    QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Installieren"_s);
+    QVERIFY(!findIn<QPushButton>(*detail, "ProjectUninstall")->isVisible());
     QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(m_paths->libraryDir() + u"/lap-timer"_s), 10000);
 }
 
-void UiSmokeTests::cardShowsWhyInstallingFailed()
+void UiSmokeTests::tileShowsWhyInstallingFailed()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
 
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
     QTest::qWait(250);
 
-    ProjectCard* card = window.findChildren<ProjectCard*>().first();
-    auto* primary = findIn<QPushButton>(*card, "ProjectPrimary");
-    auto* state = findIn<QLabel>(*card, "ProjectState");
-    auto* problem = findIn<QLabel>(*card, "ProjectProblem");
+    StoreTile* tile = window.findChildren<StoreTile*>().first();
+    auto* primary = findIn<QPushButton>(*tile, "ProjectPrimary");
+    auto* state = findIn<QLabel>(*tile, "ProjectState");
+    auto* problem = findIn<QLabel>(*tile, "ProjectProblem");
 
     // The test server answers the release list with bytes that are no JSON.
     QSignalSpy finished(m_service.get(), &launcher::InstallService::installFinished);
     primary->click();
     QCOMPARE(primary->text(), u"Abbrechen"_s); // busy at once
-    QVERIFY(findIn<QProgressBar>(*card, "ProjectProgress")->isVisible());
+    QVERIFY(findIn<QProgressBar>(*tile, "ProjectProgress")->isVisible());
+    QVERIFY(state->isVisible());
     QVERIFY(state->text().contains(u"Release"_s));
 
     QVERIFY(finished.wait(10000));
     QCOMPARE(primary->text(), u"Installieren"_s);
-    QVERIFY(!findIn<QProgressBar>(*card, "ProjectProgress")->isVisible());
+    QVERIFY(!findIn<QProgressBar>(*tile, "ProjectProgress")->isVisible());
     QVERIFY(problem->isVisible());
     QVERIFY2(problem->text().contains(u"Release-Informationen"_s), qPrintable(problem->text()));
-    QVERIFY(!m_installed->contains(card->projectId()));
-    saveScreenshot(window, u"library-install-failed"_s);
+    QVERIFY(!m_installed->contains(tile->projectId()));
+    saveScreenshot(window, u"store-install-failed"_s);
+
+    // The tile grows to hold the message, and the tiles beside it grow with it: a row stays even.
+    QTest::qWait(150);
+    QVERIFY(tile->height() >= tile->sizeHint().height());
+    QCOMPARE(tileOf(window, u"setup-sharing"_s)->height(), tile->height());
+    QCOMPARE(tileOf(window, u"lap-timer"_s)->height(), tile->height());
 
     // A new attempt clears the message at once.
     primary->click();
@@ -991,7 +1240,7 @@ void UiSmokeTests::cardAnnouncesAnUpdateAndAsksBeforeStarting()
     QCOMPARE(m_installed->get(u"lap-timer"_s)->version, u"1.4.2"_s);
 }
 
-void UiSmokeTests::cardLetsTheUserChooseTheUpdateMode()
+void UiSmokeTests::detailPageLetsTheUserChooseTheUpdateMode()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
@@ -999,38 +1248,29 @@ void UiSmokeTests::cardLetsTheUserChooseTheUpdateMode()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
-    QTest::qWait(250);
-
-    ProjectCard* installedCard = nullptr;
-    ProjectCard* freshCard = nullptr;
-    for (ProjectCard* card : window.findChildren<ProjectCard*>())
-        (card->projectId() == u"lap-timer"_s ? installedCard : freshCard) = card;
-    QVERIFY(installedCard && freshCard);
+    window.showProject(u"lap-timer"_s);
+    ProjectDetailPage* detail = detailPageOf(window);
 
     // Only an installed project has the choice, and every project starts as manual.
-    auto* mode = findIn<launcher::ui::ComboBox>(*installedCard, "ProjectUpdateMode");
+    auto* mode = findIn<ComboBox>(*detail, "ProjectUpdateMode");
     QVERIFY(mode->isVisible());
     QCOMPARE(mode->currentText(), u"Updates: Manuell"_s);
-    QVERIFY(!findIn<launcher::ui::ComboBox>(*freshCard, "ProjectUpdateMode")->isVisible());
 
     choose(mode, u"Updates: Automatisch"_s);
     QCOMPARE(m_settings->updateMode(u"lap-timer"_s), launcher::UpdateMode::Automatic);
-    QCOMPARE(m_settings->updateMode(freshCard->projectId()), launcher::UpdateMode::Manual);
+    QCOMPARE(m_settings->updateMode(u"pit-radio"_s), launcher::UpdateMode::Manual);
 
-    // The choice is stored and shown again by a new window.
+    // The choice is stored and shown again by a new window; a project that is not installed has none.
     MainWindow other(context());
     other.show();
     QVERIFY(QTest::qWaitForWindowExposed(&other));
-    other.showPage(PageId::Library);
-    QTest::qWait(250);
-    for (ProjectCard* card : other.findChildren<ProjectCard*>()) {
-        if (card->projectId() == u"lap-timer"_s)
-            QCOMPARE(findIn<launcher::ui::ComboBox>(*card, "ProjectUpdateMode")->currentText(),
-                u"Updates: Automatisch"_s);
-    }
+    other.showProject(u"lap-timer"_s);
+    QCOMPARE(findIn<ComboBox>(*detailPageOf(other), "ProjectUpdateMode")->currentText(),
+        u"Updates: Automatisch"_s);
+    other.showProject(u"pit-radio"_s);
+    QVERIFY(!findIn<ComboBox>(*detailPageOf(other), "ProjectUpdateMode")->isVisible());
 
-    // A change made elsewhere shows on the card without rebuilding the page.
+    // A change made elsewhere shows on the page without rebuilding it.
     QVERIFY(m_settings->setUpdateMode(u"lap-timer"_s, launcher::UpdateMode::Manual));
     QCOMPARE(mode->currentText(), u"Updates: Manuell"_s);
 }
@@ -1055,7 +1295,6 @@ void UiSmokeTests::cardShowsARunningProjectAndAnUnexpectedEnd()
     }
     QVERIFY(card);
     auto* primary = findIn<QPushButton>(*card, "ProjectPrimary");
-    auto* uninstall = findIn<QPushButton>(*card, "ProjectUninstall");
     auto* problem = findIn<QLabel>(*card, "ProjectProblem");
     QCOMPARE(primary->text(), u"Starten"_s);
 
@@ -1074,15 +1313,22 @@ void UiSmokeTests::cardShowsARunningProjectAndAnUnexpectedEnd()
     QCOMPARE(m_service->lastFailure(u"lap-timer"_s).kind, launcher::OperationFailure::Kind::None);
     QVERIFY(!problem->isVisible());
     QCOMPARE(primary->text(), u"Läuft"_s);
-    QVERIFY(!primary->isEnabled());   // no second start
-    QVERIFY(!uninstall->isVisible()); // and no removal while it runs
+    QVERIFY(!primary->isEnabled()); // no second start
     QVERIFY(findIn<QLabel>(*card, "ProjectState")->text().contains(u"läuft"_s));
     saveScreenshot(window, u"library-running"_s);
+
+    // While it runs, its detail page offers no removal either.
+    window.showProject(u"lap-timer"_s);
+    QVERIFY(!findIn<QPushButton>(*detailPageOf(window), "ProjectUninstall")->isVisible());
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
 
     sleepy::stop(current);
     QTRY_COMPARE_WITH_TIMEOUT((m_processes->refresh(), primary->text()), u"Starten"_s, 10000);
     QVERIFY(primary->isEnabled());
-    QVERIFY(uninstall->isVisible());
+    window.showProject(u"lap-timer"_s);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findIn<QPushButton>(*detailPageOf(window), "ProjectUninstall")->isVisible(), 5000);
 }
 
 // ---- The launcher's own update ----------------------------------------------------------
@@ -1280,15 +1526,6 @@ void UiSmokeTests::startupMessagesAreWorded()
 
 // ---- The detail page ---------------------------------------------------------------------
 
-namespace {
-
-ProjectDetailPage* detailPageOf(QWidget& window)
-{
-    return window.findChild<ProjectDetailPage*>();
-}
-
-} // namespace
-
 void UiSmokeTests::detailPageShowsTheProjectAndItsNewestRelease()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
@@ -1297,20 +1534,16 @@ void UiSmokeTests::detailPageShowsTheProjectAndItsNewestRelease()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    window.showPage(PageId::Library);
+    window.showPage(PageId::Store);
     QTest::qWait(250);
 
-    // The card has a "Details" button that opens the page.
-    ProjectCard* card = nullptr;
-    for (ProjectCard* candidate : window.findChildren<ProjectCard*>()) {
-        if (candidate->projectId() == u"lap-timer"_s)
-            card = candidate;
-    }
-    QVERIFY(card);
-    findIn<QPushButton>(*card, "ProjectDetails")->click();
+    // The tile has a "Details" button that opens the page.
+    StoreTile* tile = tileOf(window, u"lap-timer"_s);
+    QVERIFY(tile);
+    findIn<QPushButton>(*tile, "StoreTileDetails")->click();
 
     QCOMPARE(window.currentPage(), PageId::ProjectDetail);
-    QVERIFY(find<QAbstractButton>(window, "NavLibrary")->isChecked()); // the page it came from stays marked
+    QVERIFY(find<QAbstractButton>(window, "NavStore")->isChecked()); // the page it came from stays marked
     ProjectDetailPage* detail = detailPageOf(window);
     QVERIFY(detail);
     QCOMPARE(detail->projectId(), u"lap-timer"_s);
@@ -1340,13 +1573,13 @@ void UiSmokeTests::detailPageShowsTheProjectAndItsNewestRelease()
     QCOMPARE(findIn<QPushButton>(*detail, "DetailGitHub")->toolTip(),
         u"https://github.com/KERSEX/Repo-lap-timer"_s);
 
-    // The same buttons as on the card.
+    // The same buttons as on the tile.
     QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Installieren"_s);
     saveScreenshot(window, u"project-detail"_s);
 
     // "Zurück" leads to where the page was opened from.
     findIn<QPushButton>(*detail, "DetailBack")->click();
-    QCOMPARE(window.currentPage(), PageId::Library);
+    QCOMPARE(window.currentPage(), PageId::Store);
 }
 
 void UiSmokeTests::detailPageOfAnInstalledProjectShowsTheUpdateAndTheMode()
@@ -1471,11 +1704,12 @@ QStringList dashboardRows(QWidget& window, const char* section)
 
 } // namespace
 
-void UiSmokeTests::dashboardListsInstalledProjectsUpdatesAndRecentStarts()
+void UiSmokeTests::dashboardListsUpdatesAndTheProjectsAtHand()
 {
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
     QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"1.0.0"_s));
+    QVERIFY(installFake(*m_layout, *m_installed, u"setup-sharing"_s, u"3.0.0"_s)); // never started
     m_installed->recordStart(u"pit-radio"_s, QDateTime::fromString(u"2026-11-09T10:00:00Z"_s, Qt::ISODate));
     m_installed->recordStart(u"lap-timer"_s, QDateTime::fromString(u"2026-11-10T10:00:00Z"_s, Qt::ISODate));
     m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues"_s); // only lap-timer's file fits
@@ -1488,81 +1722,63 @@ void UiSmokeTests::dashboardListsInstalledProjectsUpdatesAndRecentStarts()
     QVERIFY(checked.wait(10000));
     QCOMPARE(window.currentPage(), PageId::Dashboard);
 
-    // Installed: both, by name, with their version.
-    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardInstalled").size(), 2, 5000);
-    const QStringList installed = dashboardRows(window, "DashboardInstalled");
-    QVERIFY2(installed.at(0).startsWith(u"Lap Timer | Version 1.4.2"_s), qPrintable(installed.at(0)));
-    QVERIFY2(installed.at(1).startsWith(u"Pit Radio | Version 1.0.0"_s), qPrintable(installed.at(1)));
-
     // The update that is known.
+    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardUpdates").size(), 1, 5000);
     const QStringList updates = dashboardRows(window, "DashboardUpdates");
-    QCOMPARE(updates.size(), 1);
     QVERIFY2(updates.first().startsWith(u"Lap Timer | Version 1.4.2 → 2.0.0"_s), qPrintable(updates.first()));
 
-    // Started lately: the newest start first.
+    // The projects at hand: the newest start first, a project that was never started after them.
     const QStringList recent = dashboardRows(window, "DashboardRecent");
-    QCOMPARE(recent.size(), 2);
-    QVERIFY(recent.at(0).startsWith(u"Lap Timer | Zuletzt gestartet"_s));
-    QVERIFY(recent.at(1).startsWith(u"Pit Radio | Zuletzt gestartet"_s));
+    QCOMPARE(recent.size(), 3);
+    QVERIFY2(recent.at(0).startsWith(u"Lap Timer | Version 1.4.2 · zuletzt gestartet"_s),
+        qPrintable(recent.at(0)));
+    QVERIFY2(recent.at(1).startsWith(u"Pit Radio | Version 1.0.0 · zuletzt gestartet"_s),
+        qPrintable(recent.at(1)));
+    QVERIFY2(recent.at(2).startsWith(u"Setup Sharing | Version 3.0.0 · noch nicht gestartet"_s),
+        qPrintable(recent.at(2)));
 
-    // Featured projects of the list, installed or not.
-    const QStringList featured = dashboardRows(window, "DashboardFeatured");
-    QCOMPARE(featured.size(), 2);
-    QVERIFY2(
-        featured.at(0).startsWith(u"KERS Overlay | Tools · nicht installiert"_s), qPrintable(featured.at(0)));
-    QVERIFY(featured.at(1).startsWith(u"Setup Sharing | Community · nicht installiert"_s));
+    // What is installed belongs to the library and what can be installed to the store: not repeated here.
+    QVERIFY(window.findChild<QFrame*>(u"DashboardInstalled"_s) == nullptr);
+    QVERIFY(window.findChild<QFrame*>(u"DashboardFeatured"_s) == nullptr);
     saveScreenshot(window, u"dashboard-projects"_s);
 
     // "Details" of a row opens the page of that project; "Zurück" leads back to the dashboard.
-    auto* card = window.findChild<QFrame*>(u"DashboardFeatured"_s);
+    auto* card = window.findChild<QFrame*>(u"DashboardUpdates"_s);
     card->findChild<QPushButton*>(u"DashboardDetails"_s)->click();
     QCOMPARE(window.currentPage(), PageId::ProjectDetail);
-    QCOMPARE(detailPageOf(window)->projectId(), u"kers-overlay"_s);
+    QCOMPARE(detailPageOf(window)->projectId(), u"lap-timer"_s);
     QVERIFY(find<QAbstractButton>(window, "NavDashboard")->isChecked());
     findIn<QPushButton>(*detailPageOf(window), "DetailBack")->click();
     QCOMPARE(window.currentPage(), PageId::Dashboard);
 
     // A change shows up without a new window: a project is removed.
     QVERIFY(m_installed->remove(u"pit-radio"_s));
-    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardInstalled").size(), 1, 5000);
-    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardRecent").size(), 1, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardRecent").size(), 2, 5000);
 }
 
-void UiSmokeTests::dashboardWithoutProjectsSaysSo()
+void UiSmokeTests::dashboardWithoutProjectsPointsToTheStore()
 {
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
-    // Nothing installed, nothing in the list: each place says what is missing, and the
-    // sections that would be empty are not shown at all.
-    auto* installed = window.findChild<QFrame*>(u"DashboardInstalled"_s);
-    QVERIFY(installed->findChild<QLabel*>(u"DashboardEmpty"_s)
-            ->text()
-            .contains(u"Noch keine Projekte installiert"_s));
-    QVERIFY(window.findChild<QFrame*>(u"DashboardRecent"_s)
-            ->findChild<QLabel*>(u"DashboardEmpty"_s)
-            ->text()
-            .contains(u"Noch kein Projekt gestartet"_s));
+    // Nothing installed: the sections that would be empty are not shown at all.
     QVERIFY(!window.findChild<QFrame*>(u"DashboardUpdates"_s)->isVisibleTo(&window));
-    QVERIFY(!window.findChild<QFrame*>(u"DashboardFeatured"_s)->isVisibleTo(&window));
-    QVERIFY(dashboardRows(window, "DashboardInstalled").isEmpty());
+    QVERIFY(!window.findChild<QFrame*>(u"DashboardRecent"_s)->isVisibleTo(&window));
+    QVERIFY(dashboardRows(window, "DashboardRecent").isEmpty());
 
-    // The welcome offers the library.
-    QSignalSpy requested(find<QPushButton>(window, "OpenLibrary"), &QPushButton::clicked);
-    find<QPushButton>(window, "OpenLibrary")->click();
-    QCOMPARE(window.currentPage(), PageId::Library);
+    // The welcome offers the store.
+    find<QPushButton>(window, "OpenStore")->click();
+    QCOMPARE(window.currentPage(), PageId::Store);
+    window.showPage(PageId::Dashboard);
+    QTest::qWait(250);
     saveScreenshot(window, u"dashboard-empty"_s);
 
-    // With an installed project and no update: "all current".
+    // With an installed project and no update known: the project is at hand, and there is no "Updates".
     QVERIFY(loadProjects(*m_registry, sampleProjects()));
     QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
-    window.showPage(PageId::Dashboard);
-    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QFrame*>(u"DashboardUpdates"_s)->isVisibleTo(&window), 5000);
-    QVERIFY(window.findChild<QFrame*>(u"DashboardUpdates"_s)
-            ->findChild<QLabel*>(u"DashboardEmpty"_s)
-            ->text()
-            .contains(u"aktuell"_s));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QFrame*>(u"DashboardRecent"_s)->isVisibleTo(&window), 5000);
+    QVERIFY(!window.findChild<QFrame*>(u"DashboardUpdates"_s)->isVisibleTo(&window));
 }
 
 void UiSmokeTests::dashboardOffersNoDetailsForAProjectThatLeftTheList()
@@ -1576,7 +1792,7 @@ void UiSmokeTests::dashboardOffersNoDetailsForAProjectThatLeftTheList()
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
-    auto* card = window.findChild<QFrame*>(u"DashboardInstalled"_s);
+    auto* card = window.findChild<QFrame*>(u"DashboardRecent"_s);
     int rows = 0;
     for (QWidget* row : card->findChildren<QWidget*>(u"DashboardRow"_s)) {
         ++rows;
@@ -1587,7 +1803,7 @@ void UiSmokeTests::dashboardOffersNoDetailsForAProjectThatLeftTheList()
     }
     QCOMPARE(rows, 2);
     // Its name is the id, since the list has no name for it.
-    QVERIFY(dashboardRows(window, "DashboardInstalled").first().startsWith(u"lap-timer | "_s));
+    QVERIFY(dashboardRows(window, "DashboardRecent").first().startsWith(u"lap-timer | "_s));
 }
 
 void UiSmokeTests::dashboardStartsAProject()
@@ -1600,7 +1816,7 @@ void UiSmokeTests::dashboardStartsAProject()
     MainWindow window(context());
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
-    auto* card = window.findChild<QFrame*>(u"DashboardInstalled"_s);
+    auto* card = window.findChild<QFrame*>(u"DashboardRecent"_s);
     auto* start = card->findChild<QPushButton*>(u"DashboardStart"_s);
     QVERIFY(start);
     QCOMPARE(start->text(), u"Starten"_s);
@@ -1611,7 +1827,7 @@ void UiSmokeTests::dashboardStartsAProject()
         (m_processes->refresh(), card->findChild<QPushButton*>(u"DashboardStart"_s)->text()), u"Läuft"_s,
         10000);
     QVERIFY(!card->findChild<QPushButton*>(u"DashboardStart"_s)->isEnabled());
-    QVERIFY(dashboardRows(window, "DashboardInstalled").first().contains(u"läuft"_s));
+    QVERIFY(dashboardRows(window, "DashboardRecent").first().contains(u"läuft"_s));
 
     sleepy::stop(current);
     QTRY_COMPARE_WITH_TIMEOUT(

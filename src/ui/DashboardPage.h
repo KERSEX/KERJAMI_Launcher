@@ -12,9 +12,11 @@ namespace launcher::ui {
 
 class Card;
 
-/// The start page: a welcome, the updates that are available, the installed
-/// projects, the projects started lately, the featured projects of the list, and
-/// the launcher itself with its update notice.
+/// The start page: a welcome with the way to the store, the updates that are
+/// available, the projects at hand (started last first), and the launcher itself
+/// with its update notice. Everything that can be installed is in the store and
+/// everything that is installed is in the library; this page only shows what needs
+/// attention or is wanted right now.
 ///
 /// The lists follow the managers: they are built again (once, a moment after the last
 /// change) when a project is installed, removed, started or updated, or when the list
@@ -26,8 +28,8 @@ public:
     explicit DashboardPage(const AppContext& context, QWidget* parent = nullptr);
 
 signals:
-    /// The user wants to browse the available projects.
-    void libraryRequested();
+    /// The user wants to look for projects to install.
+    void storeRequested();
 
     /// The user wants the detail page of a project.
     void projectRequested(const QString& projectId);
@@ -51,9 +53,7 @@ private:
     AppContext m_context;
     QTimer m_rebuild;
     Section m_updates;
-    Section m_installed;
     Section m_recent;
-    Section m_featured;
 };
 
 } // namespace launcher::ui

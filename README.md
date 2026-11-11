@@ -18,8 +18,9 @@ Alle acht Phasen sind umgesetzt: Build-System, Hauptfenster mit dunklem Theme, p
 Pfadverwaltung, Einstellungen und Logging, der GitHub-Client, die in das Programm eingebaute
 Projektliste, die Auswahl der neuesten stabilen Version, die
 Download-Warteschlange mit Fortschritt und die Installation: SHA-256-Prüfung, ZIP-Prüfung und
-sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden in
-der Bibliothek installiert, gestartet und entfernt. Der Launcher erkennt laufende Projekte und
+sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. Projekte werden im
+Store gefunden und installiert, in der Bibliothek gestartet und aktualisiert und auf ihrer
+Detailseite entfernt. Der Launcher erkennt laufende Projekte und
 prüft installierte Projekte auf neue Versionen: je Projekt manuell (Hinweis und Rückfrage) oder
 automatisch (wird installiert, sobald das Projekt geschlossen ist). Der Launcher aktualisiert sich
 selbst: Er lädt das neue Release, prüft es gegen Prüfsumme und Manifest und übergibt an eine Kopie
@@ -79,7 +80,7 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `UpdaterTests` | Die echte `KERJAMI_Launcher.exe` im Austausch-Modus: Austausch, Warten auf den Launcher, Ablehnung, Bericht, Neustart |
 | `LauncherUpdateTests` | Launcher-Update: Prüfung, feindliche Pakete, Abbruch, Übergabe, Selbstupdate von Anfang bis Ende |
 | `StorageTests` | Größen und Aufräumen von Downloads, temporären Dateien und Sicherungen, nie durch einen Link |
-| `UiSmokeTests` | Navigation, Einstellungen, Bibliothek, Detailseite, Dashboard, Speicherverwaltung, Downloads-Seite, Launcher-Update |
+| `UiSmokeTests` | Navigation, Einstellungen, Store, Bibliothek, Detailseite, Dashboard, Speicherverwaltung, Downloads-Seite, Launcher-Update |
 | `PackageTests` | Das Paket-Skript: ein gutes Paket besteht die Prüfung, sechs kaputte werden abgelehnt |
 
 Der UI-Test läuft ohne sichtbares Fenster und legt Screenshots aller Seiten in

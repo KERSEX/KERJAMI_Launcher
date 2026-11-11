@@ -9,6 +9,7 @@
 #include "ui/LibraryPage.h"
 #include "ui/ProjectDetailPage.h"
 #include "ui/SettingsPage.h"
+#include "ui/StorePage.h"
 #include "ui/Theme.h"
 
 #include <QButtonGroup>
@@ -51,6 +52,8 @@ MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     // Order must match PageId.
     auto* dashboard = new DashboardPage(context, m_pages);
     m_pages->addWidget(dashboard);
+    auto* store = new StorePage(context, m_pages);
+    m_pages->addWidget(store);
     auto* library = new LibraryPage(context, m_pages);
     m_pages->addWidget(library);
     m_pages->addWidget(new DownloadsPage(context.downloads, m_pages));
@@ -62,9 +65,11 @@ MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     layout->addWidget(m_pages, 1);
     setCentralWidget(central);
 
-    connect(dashboard, &DashboardPage::libraryRequested, this, [this] { showPage(PageId::Library); });
+    connect(dashboard, &DashboardPage::storeRequested, this, [this] { showPage(PageId::Store); });
     connect(dashboard, &DashboardPage::projectRequested, this, &MainWindow::showProject);
+    connect(store, &StorePage::projectDetailsRequested, this, &MainWindow::showProject);
     connect(library, &LibraryPage::projectDetailsRequested, this, &MainWindow::showProject);
+    connect(library, &LibraryPage::storeRequested, this, [this] { showPage(PageId::Store); });
     connect(m_detail, &ProjectDetailPage::backRequested, this, [this] { showPage(m_detailOrigin); });
 
     connect(&settings, &SettingsManager::saveFailed, this, [this](const QString& reason) {
@@ -133,6 +138,7 @@ QWidget* MainWindow::createSidebar()
         layout->addWidget(button);
     };
     addEntry(PageId::Dashboard, Glyph::Home, tr("Dashboard"), "NavDashboard");
+    addEntry(PageId::Store, Glyph::Store, tr("Store"), "NavStore");
     addEntry(PageId::Library, Glyph::Library, tr("Bibliothek"), "NavLibrary");
     addEntry(PageId::Downloads, Glyph::Download, tr("Downloads"), "NavDownloads");
     layout->addStretch(1);

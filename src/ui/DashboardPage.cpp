@@ -24,7 +24,6 @@ namespace launcher::ui {
 namespace {
 
 constexpr int kRecentCount = 5;
-constexpr int kFeaturedCount = 4;
 
 /// What an update that is under way is doing, for the line under the project's name.
 QString updateStateText(UpdateState state)
@@ -70,17 +69,19 @@ DashboardPage::DashboardPage(const AppContext& context, QWidget* parent)
     welcomeTexts->addStretch(1);
     welcomeTexts->addWidget(
         createLabel(tr("Willkommen bei %1").arg(branding::productName()), "hero", welcome));
-    QLabel* intro = createLabel(
-        tr("Freigegebene Projekte entdecken, installieren, starten und aktuell halten. Alles an einem Ort."),
+    QLabel* intro = createLabel(tr("Im Store findest du alle freigegebenen Projekte. Installiere sie mit "
+                                   "einem Klick, starte sie hier und "
+                                   "halte sie aktuell."),
         "secondary", welcome);
     intro->setWordWrap(true);
     welcomeTexts->addWidget(intro);
-    auto* toLibrary = new QPushButton(tr("Zur Bibliothek"), welcome);
-    toLibrary->setObjectName("OpenLibrary");
-    toLibrary->setCursor(Qt::PointingHandCursor);
-    connect(toLibrary, &QPushButton::clicked, this, &DashboardPage::libraryRequested);
+    auto* toStore = new QPushButton(tr("Zum Store"), welcome);
+    toStore->setObjectName("OpenStore");
+    toStore->setCursor(Qt::PointingHandCursor);
+    toStore->setProperty("accent", true);
+    connect(toStore, &QPushButton::clicked, this, &DashboardPage::storeRequested);
     welcomeTexts->addSpacing(6);
-    welcomeTexts->addWidget(toLibrary, 0, Qt::AlignLeft);
+    welcomeTexts->addWidget(toStore, 0, Qt::AlignLeft);
     welcomeTexts->addStretch(1);
     welcomeRow->addLayout(welcomeTexts, 1);
 
@@ -92,14 +93,11 @@ DashboardPage::DashboardPage(const AppContext& context, QWidget* parent)
     welcome->body()->addLayout(welcomeRow);
     contentLayout()->addWidget(welcome);
 
+    // Only what needs attention or is at hand: the sections are there while they have something to show.
     contentLayout()->addSpacing(8);
-    m_updates = createSection(tr("Verfügbare Updates"), "DashboardUpdates");
+    m_updates = createSection(tr("Updates"), "DashboardUpdates");
     contentLayout()->addSpacing(8);
-    m_installed = createSection(tr("Installierte Projekte"), "DashboardInstalled");
-    contentLayout()->addSpacing(8);
-    m_recent = createSection(tr("Zuletzt gestartet"), "DashboardRecent");
-    contentLayout()->addSpacing(8);
-    m_featured = createSection(tr("Empfohlene Projekte"), "DashboardFeatured");
+    m_recent = createSection(tr("Zuletzt verwendet"), "DashboardRecent");
 
     contentLayout()->addSpacing(8);
     contentLayout()->addWidget(createLabel(tr("Launcher"), "section", this));
@@ -212,6 +210,8 @@ void DashboardPage::fill(Section& section, const QList<QWidget*>& rows, const QS
     }
 
     if (rows.isEmpty()) {
+        if (emptyText.isEmpty())
+            return;
         QLabel* empty = createLabel(emptyText, "secondary", section.card);
         empty->setObjectName("DashboardEmpty");
         empty->setWordWrap(true);
@@ -253,61 +253,32 @@ void DashboardPage::rebuildLists()
                 .arg(record.version, update.latestVersion, updateStateText(update.state)),
             false));
     }
-    const bool anyInstalled = !installed.isEmpty();
-    m_updates.title->setVisible(anyInstalled);
-    m_updates.card->setVisible(anyInstalled);
-    fill(m_updates, updateRows, tr("Alle installierten Projekte sind aktuell."));
+    m_updates.title->setVisible(!updateRows.isEmpty());
+    m_updates.card->setVisible(!updateRows.isEmpty());
+    fill(m_updates, updateRows, QString());
 
-    // --- installed ---
-    QList<QWidget*> installedRows;
-    for (const InstalledProject& record : std::as_const(installed)) {
-        const UpdateInfo update = m_context.updates.info(record.projectId);
+    // --- the projects at hand: the ones started last first, then those never started ---
+    std::stable_sort(
+        installed.begin(), installed.end(), [](const InstalledProject& a, const InstalledProject& b) {
+            if (a.lastStartedAt.isValid() != b.lastStartedAt.isValid())
+                return a.lastStartedAt.isValid();
+            return a.lastStartedAt > b.lastStartedAt;
+        });
+    QList<QWidget*> recentRows;
+    for (qsizetype i = 0; i < installed.size() && i < kRecentCount; ++i) {
+        const InstalledProject& record = installed.at(i);
         QString detail = tr("Version %1").arg(record.version);
         if (m_context.processes.isRunning(record.projectId))
             detail += tr(" · läuft");
-        else if (update.state == UpdateState::UpToDate)
-            detail += tr(" · aktuell");
-        installedRows.append(createProjectRow(record.projectId, nameOf(record.projectId), detail, true));
+        else if (record.lastStartedAt.isValid())
+            detail += tr(" · zuletzt gestartet: %1").arg(timeText(record.lastStartedAt));
+        else
+            detail += tr(" · noch nicht gestartet");
+        recentRows.append(createProjectRow(record.projectId, nameOf(record.projectId), detail, true));
     }
-    fill(m_installed, installedRows,
-        tr("Noch keine Projekte installiert. In der Bibliothek findest du alle freigegebenen Projekte."));
-
-    // --- started lately ---
-    QList<InstalledProject> started;
-    for (const InstalledProject& record : std::as_const(installed)) {
-        if (record.lastStartedAt.isValid())
-            started.append(record);
-    }
-    std::sort(started.begin(), started.end(), [](const InstalledProject& a, const InstalledProject& b) {
-        return a.lastStartedAt > b.lastStartedAt;
-    });
-    QList<QWidget*> recentRows;
-    for (qsizetype i = 0; i < started.size() && i < kRecentCount; ++i) {
-        const InstalledProject& record = started.at(i);
-        recentRows.append(createProjectRow(record.projectId, nameOf(record.projectId),
-            tr("Zuletzt gestartet: %1").arg(timeText(record.lastStartedAt)), true));
-    }
-    fill(m_recent, recentRows, tr("Noch kein Projekt gestartet."));
-
-    // --- featured ---
-    QList<Project> featured;
-    for (const Project& project : m_context.registry.projects()) {
-        if (project.featured)
-            featured.append(project);
-    }
-    std::sort(featured.begin(), featured.end(),
-        [](const Project& a, const Project& b) { return QString::localeAwareCompare(a.name, b.name) < 0; });
-    QList<QWidget*> featuredRows;
-    for (qsizetype i = 0; i < featured.size() && i < kFeaturedCount; ++i) {
-        const Project& project = featured.at(i);
-        const QString state =
-            m_context.installed.contains(project.id) ? tr("installiert") : tr("nicht installiert");
-        featuredRows.append(createProjectRow(project.id, project.name,
-            u"%1 · %2 · %3"_s.arg(project.category, state, project.description), false));
-    }
-    m_featured.title->setVisible(!featuredRows.isEmpty());
-    m_featured.card->setVisible(!featuredRows.isEmpty());
-    fill(m_featured, featuredRows, QString());
+    m_recent.title->setVisible(!recentRows.isEmpty());
+    m_recent.card->setVisible(!recentRows.isEmpty());
+    fill(m_recent, recentRows, QString());
 }
 
 } // namespace launcher::ui

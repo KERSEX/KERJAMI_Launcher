@@ -35,22 +35,30 @@ bool updateUnderWay(UpdateState state)
 
 } // namespace
 
-ProjectControls::ProjectControls(const Project& project, const AppContext& context, QWidget* parent)
+ProjectControls::ProjectControls(
+    const Project& project, const AppContext& context, Mode mode, QWidget* parent)
     : QWidget(parent)
     , m_project(project)
     , m_context(context)
+    , m_mode(mode)
 {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    // What the user can do, and how it is going.
+    // What the user can do, and how it is going. In the narrow tile of the store the status line
+    // gets a row of its own above the buttons; elsewhere it shares the row with them.
     m_actions = new QHBoxLayout;
     m_actions->setSpacing(10);
     m_state = createLabel(QString(), "secondary", this);
     m_state->setObjectName("ProjectState");
     m_state->setWordWrap(true);
-    m_actions->addWidget(m_state, 1);
+    if (m_mode == Mode::Store) {
+        layout->addWidget(m_state);
+        m_actions->addStretch(1);
+    } else {
+        m_actions->addWidget(m_state, 1);
+    }
 
     m_updateMode = new ComboBox(this);
     m_updateMode->setObjectName("ProjectUpdateMode");
@@ -109,7 +117,7 @@ ProjectControls::ProjectControls(const Project& project, const AppContext& conte
 
 void ProjectControls::addLeadingButton(QPushButton* button)
 {
-    // After the status line, before the update mode.
+    // After the status line (or the stretch that takes its place), before the update mode.
     button->setParent(this);
     m_actions->insertWidget(1, button, 0, Qt::AlignVCenter);
 }
@@ -143,16 +151,18 @@ void ProjectControls::refresh()
     const bool updateKnown = record && update.updateKnown() && update.state != UpdateState::UpToDate;
 
     // --- the main button ---
+    // In the store an installed project has nothing to start: the status line says it is there.
+    m_primary->setVisible(!(m_mode == Mode::Store && record && !busy));
     if (busy) {
         m_primary->setText(tr("Abbrechen"));
         m_primary->setProperty("accent", false);
         // Replacing the installed version cannot be stopped any more.
         m_primary->setEnabled(status.stage != ProjectStatus::Stage::Replacing);
-    } else if (running) {
+    } else if (running && m_mode != Mode::Store) {
         m_primary->setText(tr("Läuft"));
         m_primary->setProperty("accent", false);
         m_primary->setEnabled(false);
-    } else if (record) {
+    } else if (record && m_mode != Mode::Store) {
         m_primary->setText(tr("Starten"));
         m_primary->setProperty("accent", true);
         m_primary->setEnabled(true);
@@ -170,9 +180,10 @@ void ProjectControls::refresh()
         && (update.state == UpdateState::Available || update.state == UpdateState::Failed) && updateKnown;
     m_update->setVisible(canUpdate);
     m_update->setText(update.state == UpdateState::Failed ? tr("Erneut versuchen") : tr("Aktualisieren"));
-    m_uninstall->setVisible(record.has_value() && !busy && !running);
+    // Removing and reconfiguring a project belong to its detail page, not to the lists.
+    m_uninstall->setVisible(m_mode == Mode::Full && record.has_value() && !busy && !running);
 
-    m_updateMode->setVisible(record.has_value());
+    m_updateMode->setVisible(m_mode == Mode::Full && record.has_value());
     const int modeIndex =
         m_updateMode->findData(static_cast<int>(m_context.settings.updateMode(m_project.id)));
     if (modeIndex >= 0 && modeIndex != m_updateMode->currentIndex()) {
@@ -195,9 +206,12 @@ void ProjectControls::refresh()
         m_state->setText(tr("Installiert: Version %1 · aktuell").arg(record->version));
     } else if (record) {
         m_state->setText(tr("Installiert: Version %1").arg(record->version));
+    } else if (m_mode == Mode::Store) {
+        m_state->setText({}); // the "Installieren" button says it all
     } else {
         m_state->setText(tr("Nicht installiert"));
     }
+    m_state->setVisible(!m_state->text().isEmpty());
 
     // --- progress ---
     m_progress->setVisible(status.isBusy() && status.stage != ProjectStatus::Stage::Prepared);
