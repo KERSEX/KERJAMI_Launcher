@@ -231,8 +231,11 @@ void LibraryPage::rebuildList()
         return;
     }
 
-    for (const Project& project : projects)
-        m_listLayout->addWidget(new ProjectCard(project, m_context, m_listHolder));
+    for (const Project& project : projects) {
+        auto* card = new ProjectCard(project, m_context, m_listHolder);
+        connect(card, &ProjectCard::detailsRequested, this, &LibraryPage::projectDetailsRequested);
+        m_listLayout->addWidget(card);
+    }
 }
 
 } // namespace launcher::ui

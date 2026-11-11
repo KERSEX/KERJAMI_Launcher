@@ -178,8 +178,8 @@ int Application::run()
     QObject::connect(
         &launcherUpdates, &LauncherUpdateManager::restartRequested, &m_app, &QCoreApplication::quit);
 
-    ui::AppContext context {
-        paths, settings, registry, downloads, installed, installService, processes, updates, launcherUpdates};
+    ui::AppContext context {paths, settings, registry, downloads, installed, installService, processes,
+        updates, launcherUpdates, releases};
     ui::MainWindow window(context);
     window.show();
     updates.start();

@@ -9,6 +9,7 @@ class PathManager;
 class ProcessManager;
 class ProjectUpdateManager;
 class RegistryManager;
+class ReleaseManager;
 class SettingsManager;
 } // namespace launcher
 
@@ -26,6 +27,7 @@ struct AppContext {
     ProcessManager& processes;
     ProjectUpdateManager& updates;
     LauncherUpdateManager& launcherUpdates;
+    ReleaseManager& releases;
 };
 
 } // namespace launcher::ui

@@ -2,10 +2,12 @@
 
 #include "app/Branding.h"
 #include "core/SettingsManager.h"
+#include "github/RegistryManager.h"
 #include "ui/Controls.h"
 #include "ui/DashboardPage.h"
 #include "ui/DownloadsPage.h"
 #include "ui/LibraryPage.h"
+#include "ui/ProjectDetailPage.h"
 #include "ui/SettingsPage.h"
 #include "ui/Theme.h"
 
@@ -31,6 +33,7 @@ constexpr int kFadeDurationMs = 140;
 
 MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     : QMainWindow(parent)
+    , m_context(context)
 {
     SettingsManager& settings = context.settings;
     setWindowTitle(branding::displayName());
@@ -48,15 +51,21 @@ MainWindow::MainWindow(const AppContext& context, QWidget* parent)
     // Order must match PageId.
     auto* dashboard = new DashboardPage(context, m_pages);
     m_pages->addWidget(dashboard);
-    m_pages->addWidget(new LibraryPage(context, m_pages));
+    auto* library = new LibraryPage(context, m_pages);
+    m_pages->addWidget(library);
     m_pages->addWidget(new DownloadsPage(context.downloads, m_pages));
-    m_pages->addWidget(new SettingsPage(context.paths, settings, context.launcherUpdates, m_pages));
+    m_pages->addWidget(new SettingsPage(context, m_pages));
+    m_detail = new ProjectDetailPage(context, m_pages);
+    m_pages->addWidget(m_detail);
 
     layout->addWidget(createSidebar());
     layout->addWidget(m_pages, 1);
     setCentralWidget(central);
 
     connect(dashboard, &DashboardPage::libraryRequested, this, [this] { showPage(PageId::Library); });
+    connect(dashboard, &DashboardPage::projectRequested, this, &MainWindow::showProject);
+    connect(library, &LibraryPage::projectDetailsRequested, this, &MainWindow::showProject);
+    connect(m_detail, &ProjectDetailPage::backRequested, this, [this] { showPage(m_detailOrigin); });
 
     connect(&settings, &SettingsManager::saveFailed, this, [this](const QString& reason) {
         QMessageBox::warning(this, tr("Einstellungen"),
@@ -75,6 +84,20 @@ MainWindow::PageId MainWindow::currentPage() const
 void MainWindow::showPage(PageId page)
 {
     switchTo(page, true);
+}
+
+void MainWindow::showProject(const QString& projectId)
+{
+    for (const Project& project : m_context.registry.projects()) {
+        if (project.id != projectId)
+            continue;
+        // "Zurück" leads to the page the user came from, never to the detail page itself.
+        if (currentPage() != PageId::ProjectDetail)
+            m_detailOrigin = currentPage();
+        m_detail->showProject(project);
+        switchTo(PageId::ProjectDetail, true);
+        return;
+    }
 }
 
 QWidget* MainWindow::createSidebar()
@@ -129,7 +152,9 @@ QWidget* MainWindow::createSidebar()
 
 void MainWindow::switchTo(PageId page, bool animate)
 {
-    if (QAbstractButton* button = m_navigation->button(static_cast<int>(page)))
+    // The detail page has no entry of its own; the one of the page it was opened from stays marked.
+    const PageId marked = page == PageId::ProjectDetail ? m_detailOrigin : page;
+    if (QAbstractButton* button = m_navigation->button(static_cast<int>(marked)))
         button->setChecked(true);
 
     QWidget* target = m_pages->widget(static_cast<int>(page));

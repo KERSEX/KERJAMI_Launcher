@@ -1,17 +1,26 @@
 #include "ui/SettingsPage.h"
 
 #include "app/Branding.h"
+#include "core/Format.h"
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
+#include "downloads/DownloadManager.h"
+#include "installer/InstallService.h"
 #include "ui/Controls.h"
+#include "ui/Dialogs.h"
 #include "ui/LauncherUpdatePanel.h"
+#include "updater/LauncherUpdateManager.h"
 
 #include <QDesktopServices>
 #include <QDir>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QPushButton>
+#include <QThread>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <memory>
 
 namespace launcher::ui {
 
@@ -31,13 +40,20 @@ QPushButton* createButton(const QString& text, QWidget* parent)
 
 } // namespace
 
-SettingsPage::SettingsPage(const PathManager& paths, SettingsManager& settings,
-    LauncherUpdateManager& launcherUpdates, QWidget* parent)
+SettingsPage::SettingsPage(const AppContext& context, QWidget* parent)
     : Page(tr("Einstellungen"), tr("Änderungen werden sofort gespeichert."), parent)
-    , m_settings(settings)
+    , m_context(context)
+    , m_settings(context.settings)
 {
+    const PathManager& paths = context.paths;
+    LauncherUpdateManager& launcherUpdates = context.launcherUpdates;
+
     contentLayout()->addWidget(createLabel(tr("Speicherort"), "section", this));
     contentLayout()->addWidget(createStorageCard(paths));
+
+    contentLayout()->addSpacing(8);
+    contentLayout()->addWidget(createLabel(tr("Speicherplatz"), "section", this));
+    contentLayout()->addWidget(createUsageCard());
 
     contentLayout()->addSpacing(8);
     contentLayout()->addWidget(createLabel(tr("Updates"), "section", this));
@@ -52,6 +68,169 @@ SettingsPage::SettingsPage(const PathManager& paths, SettingsManager& settings,
     contentLayout()->addWidget(createAboutCard(paths, launcherUpdates));
 
     contentLayout()->addStretch(1);
+}
+
+SettingsPage::~SettingsPage()
+{
+    // A measuring or cleaning thread delivers its result to this page: it must be over first.
+    m_stopping = true;
+    for (QThread* thread : std::as_const(m_threads)) {
+        thread->wait();
+        delete thread;
+    }
+}
+
+void SettingsPage::showEvent(QShowEvent* event)
+{
+    Page::showEvent(event);
+    measureUsage();
+    updateCleanButtons();
+}
+
+QWidget* SettingsPage::createUsageCard()
+{
+    auto* card = new Card(this);
+
+    // A size and a button on the right of a row.
+    const auto control = [card](QLabel* size, QPushButton* button) {
+        auto* box = new QWidget(card);
+        auto* layout = new QHBoxLayout(box);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(14);
+        layout->addWidget(size);
+        layout->addWidget(button);
+        return box;
+    };
+
+    m_downloadsSize = createLabel(tr("wird berechnet …"), "secondary", card);
+    m_downloadsSize->setObjectName("UsageDownloads");
+    m_cleanDownloads = createButton(tr("Aufräumen"), card);
+    m_cleanDownloads->setObjectName("CleanDownloads");
+    connect(m_cleanDownloads, &QPushButton::clicked, this,
+        [this] { cleanUp(Dialogs::StorageCleanup::DownloadsAndTemp); });
+    card->body()->addWidget(createRow(tr("Downloads und temporäre Dateien"),
+        tr("Heruntergeladene Archive und Zwischenstände. Sie werden nur für Installationen gebraucht."),
+        control(m_downloadsSize, m_cleanDownloads)));
+
+    card->body()->addWidget(createDivider(card));
+
+    m_backupsSize = createLabel(tr("wird berechnet …"), "secondary", card);
+    m_backupsSize->setObjectName("UsageBackups");
+    m_cleanBackups = createButton(tr("Löschen"), card);
+    m_cleanBackups->setObjectName("CleanBackups");
+    connect(
+        m_cleanBackups, &QPushButton::clicked, this, [this] { cleanUp(Dialogs::StorageCleanup::Backups); });
+    card->body()->addWidget(createRow(tr("Sicherungen früherer Versionen"),
+        tr("Bei jedem Update bleiben die zwei letzten Versionen eines Projekts erhalten. Installierte "
+           "Versionen werden nie angefasst."),
+        control(m_backupsSize, m_cleanBackups)));
+
+    m_usageProblem = createLabel(QString(), "error", card);
+    m_usageProblem->setObjectName("UsageProblem");
+    m_usageProblem->setWordWrap(true);
+    m_usageProblem->setVisible(false);
+    card->body()->addWidget(m_usageProblem);
+
+    // The buttons depend on whether anything is running.
+    connect(
+        &m_context.installService, &InstallService::statusChanged, this, [this] { updateCleanButtons(); });
+    connect(&m_context.downloads, &DownloadManager::stateChanged, this, [this] { updateCleanButtons(); });
+    connect(&m_context.launcherUpdates, &LauncherUpdateManager::infoChanged, this,
+        [this] { updateCleanButtons(); });
+    updateCleanButtons();
+    return card;
+}
+
+void SettingsPage::runInBackground(std::function<QString()> work, std::function<void(const QString&)> done)
+{
+    QThread* thread = QThread::create([this, work = std::move(work), done = std::move(done)] {
+        const QString result = work();
+        if (m_stopping)
+            return;
+        QMetaObject::invokeMethod(this, [done, result] { done(result); }, Qt::QueuedConnection);
+    });
+    m_threads.append(thread);
+    connect(thread, &QThread::finished, this, [this, thread] {
+        m_threads.removeOne(thread);
+        thread->deleteLater();
+    });
+    thread->start();
+}
+
+void SettingsPage::measureUsage()
+{
+    const PathManager& paths = m_context.paths;
+    // The helper carries text; the sizes travel in a shared record next to it.
+    const auto measured = std::make_shared<Storage::Usage>();
+    runInBackground(
+        [&paths, measured, this] {
+            *measured = Storage::measure(paths, &m_stopping);
+            return QString();
+        },
+        [this, measured](const QString&) { showUsage(*measured); });
+}
+
+void SettingsPage::showUsage(const Storage::Usage& usage)
+{
+    m_usage = usage;
+    m_usageKnown = true;
+    m_downloadsSize->setText(format::bytes(usage.downloadsAndTemp));
+    m_backupsSize->setText(format::bytes(usage.backups));
+    updateCleanButtons();
+}
+
+bool SettingsPage::cleanUpAllowed() const
+{
+    using State = LauncherUpdateState;
+    const State update = m_context.launcherUpdates.info().state;
+    const bool updating = update == State::Downloading || update == State::Preparing || update == State::Ready
+        || update == State::Applying;
+    return !m_cleaning && m_context.installService.busyCount() == 0 && m_context.downloads.activeCount() == 0
+        && !updating;
+}
+
+void SettingsPage::updateCleanButtons()
+{
+    if (!m_cleanDownloads)
+        return;
+    const bool allowed = cleanUpAllowed();
+    const QString why = tr("Das geht erst, wenn alle Downloads, Installationen und Updates beendet sind.");
+    m_cleanDownloads->setEnabled(allowed && m_usageKnown && m_usage.downloadsAndTemp > 0);
+    m_cleanBackups->setEnabled(allowed && m_usageKnown && m_usage.backups > 0);
+    m_cleanDownloads->setToolTip(allowed ? QString() : why);
+    m_cleanBackups->setToolTip(allowed ? QString() : why);
+}
+
+void SettingsPage::cleanUp(Dialogs::StorageCleanup what)
+{
+    if (!cleanUpAllowed())
+        return;
+    const bool backups = what == Dialogs::StorageCleanup::Backups;
+    const qint64 size = backups ? m_usage.backups : m_usage.downloadsAndTemp;
+    if (!Dialogs::confirmStorageCleanup(this, what, format::bytes(size)))
+        return;
+
+    m_cleaning = true;
+    m_usageProblem->setVisible(false);
+    updateCleanButtons();
+
+    const PathManager& paths = m_context.paths;
+    runInBackground(
+        [&paths, backups] {
+            QString error;
+            const bool ok = backups ? Storage::clearBackups(paths, &error)
+                                    : Storage::clearDownloadsAndTemp(paths, &error);
+            return ok ? QString() : (error.isEmpty() ? QStringLiteral("?") : error);
+        },
+        [this](const QString& error) {
+            m_cleaning = false;
+            if (!error.isEmpty()) {
+                m_usageProblem->setText(tr("Nicht alles konnte gelöscht werden: %1").arg(error));
+                m_usageProblem->setVisible(true);
+            }
+            measureUsage();
+            updateCleanButtons();
+        });
 }
 
 QWidget* SettingsPage::createStorageCard(const PathManager& paths)

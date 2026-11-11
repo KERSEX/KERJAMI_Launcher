@@ -15,6 +15,7 @@ namespace {
 std::function<bool(const Project&)> g_testAnswer;
 std::function<bool(const Project&, const UpdateInfo&)> g_updateAnswer;
 std::function<bool(const LauncherUpdateInfo&)> g_launcherUpdateAnswer;
+std::function<bool(StorageCleanup)> g_storageAnswer;
 
 QString tr(const char* text)
 {
@@ -36,6 +37,35 @@ void setUpdateConfirmationForTests(std::function<bool(const Project&, const Upda
 void setLauncherUpdateConfirmationForTests(std::function<bool(const LauncherUpdateInfo&)> answer)
 {
     g_launcherUpdateAnswer = std::move(answer);
+}
+
+void setStorageCleanupConfirmationForTests(std::function<bool(StorageCleanup)> answer)
+{
+    g_storageAnswer = std::move(answer);
+}
+
+bool confirmStorageCleanup(QWidget* parent, StorageCleanup what, const QString& size)
+{
+    if (g_storageAnswer)
+        return g_storageAnswer(what);
+
+    const bool backups = what == StorageCleanup::Backups;
+    QMessageBox box(QMessageBox::Warning,
+        backups ? tr("Sicherungen löschen") : tr("Downloads und temporäre Dateien löschen"),
+        backups ? tr("Alle gesicherten früheren Versionen löschen (%1)?").arg(size)
+                : tr("Heruntergeladene Dateien und temporäre Dateien löschen (%1)?").arg(size),
+        QMessageBox::NoButton, parent);
+    box.setInformativeText(backups
+            ? tr("Die installierten Versionen bleiben unberührt. Danach lässt sich eine frühere Version "
+                 "eines Projekts nicht mehr von Hand zurückholen. Das kann nicht rückgängig gemacht werden.")
+            : tr("Es läuft gerade nichts. Heruntergeladene Dateien müssen für eine Installation neu "
+                 "geladen werden. Installierte Projekte und deine Einstellungen bleiben unberührt."));
+    QPushButton* remove = box.addButton(tr("Löschen"), QMessageBox::DestructiveRole);
+    QPushButton* keep = box.addButton(tr("Abbrechen"), QMessageBox::RejectRole);
+    box.setDefaultButton(keep);
+    box.setEscapeButton(keep);
+    box.exec();
+    return box.clickedButton() == remove;
 }
 
 bool confirmLauncherUpdate(QWidget* parent, const LauncherUpdateInfo& info)

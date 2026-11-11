@@ -3,9 +3,22 @@
 #include "ui/AppContext.h"
 #include "ui/Page.h"
 
+#include <QTimer>
+
+class QLabel;
+class QVBoxLayout;
+
 namespace launcher::ui {
 
-/// Start page with the overview of installed projects and the launcher itself.
+class Card;
+
+/// The start page: a welcome, the updates that are available, the installed
+/// projects, the projects started lately, the featured projects of the list, and
+/// the launcher itself with its update notice.
+///
+/// The lists follow the managers: they are built again (once, a moment after the last
+/// change) when a project is installed, removed, started or updated, or when the list
+/// of projects changes.
 class DashboardPage : public Page {
     Q_OBJECT
 
@@ -15,6 +28,32 @@ public:
 signals:
     /// The user wants to browse the available projects.
     void libraryRequested();
+
+    /// The user wants the detail page of a project.
+    void projectRequested(const QString& projectId);
+
+private:
+    struct Section {
+        QLabel* title = nullptr;
+        Card* card = nullptr;
+        QVBoxLayout* body = nullptr;
+    };
+
+    Section createSection(const QString& title, const char* objectName);
+    void rebuildLists();
+    void scheduleRebuild() { m_rebuild.start(); }
+
+    /// One project in a list: name and detail line, "Starten" if @p withStart, "Details".
+    QWidget* createProjectRow(
+        const QString& projectId, const QString& name, const QString& detail, bool withStart);
+    void fill(Section& section, const QList<QWidget*>& rows, const QString& emptyText);
+
+    AppContext m_context;
+    QTimer m_rebuild;
+    Section m_updates;
+    Section m_installed;
+    Section m_recent;
+    Section m_featured;
 };
 
 } // namespace launcher::ui

@@ -7,6 +7,7 @@
 #include "SleepyProject.h"
 #include "TestHttpServer.h"
 #include "app/Branding.h"
+#include "core/Format.h"
 #include "core/PathManager.h"
 #include "core/SettingsManager.h"
 #include "downloads/DownloadManager.h"
@@ -24,6 +25,7 @@
 #include "ui/MainWindow.h"
 #include "ui/OperationMessages.h"
 #include "ui/ProjectCard.h"
+#include "ui/ProjectDetailPage.h"
 #include "ui/Theme.h"
 #include "updater/LauncherUpdateManager.h"
 #include "updater/ProjectUpdateManager.h"
@@ -39,6 +41,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -54,7 +57,9 @@ using launcher::GitHubClient;
 using launcher::PathManager;
 using launcher::RegistryManager;
 using launcher::SettingsManager;
+using launcher::ui::ComboBox;
 using launcher::ui::ProjectCard;
+using launcher::ui::ProjectDetailPage;
 
 namespace {
 
@@ -142,6 +147,18 @@ private slots:
     void launcherUpdateFailuresAreExplained();
     void startupMessagesAreWorded();
 
+    void detailPageShowsTheProjectAndItsNewestRelease();
+    void detailPageOfAnInstalledProjectShowsTheUpdateAndTheMode();
+    void detailPageExplainsAFailedLookupAndCanAskAgain();
+    void detailPageDoesNotAskAgainForAFreshAnswer();
+
+    void dashboardListsInstalledProjectsUpdatesAndRecentStarts();
+    void dashboardWithoutProjectsSaysSo();
+    void dashboardStartsAProject();
+
+    void settingsShowTheStorageAndCleanUpOnRequest();
+    void settingsDoNotCleanUpWhileSomethingRuns();
+
     void downloadsPageStartsEmpty();
     void downloadsPageShowsProgressAndCancels();
     void downloadsPageShowsFinishedAndFailedDownloads();
@@ -151,7 +168,7 @@ private:
     launcher::ui::AppContext context()
     {
         return {*m_paths, *m_settings, *m_registry, *m_downloads, *m_installed, *m_service, *m_processes,
-            *m_updates, *m_launcherUpdates};
+            *m_updates, *m_launcherUpdates, *m_releases};
     }
 
     launcher::DownloadRequest downloadRequest(
@@ -1258,6 +1275,441 @@ void UiSmokeTests::startupMessagesAreWorded()
     QCOMPARE(launcher::ui::recoveryMessage(result)->level, Level::Critical);
     result.outcome = TransactionOutcome::NothingToDo;
     QVERIFY(!launcher::ui::recoveryMessage(result).has_value());
+}
+
+// ---- The detail page ---------------------------------------------------------------------
+
+namespace {
+
+ProjectDetailPage* detailPageOf(QWidget& window)
+{
+    return window.findChild<ProjectDetailPage*>();
+}
+
+} // namespace
+
+void UiSmokeTests::detailPageShowsTheProjectAndItsNewestRelease()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues Fahrzeugmodell\n- Fehler behoben"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Library);
+    QTest::qWait(250);
+
+    // The card has a "Details" button that opens the page.
+    ProjectCard* card = nullptr;
+    for (ProjectCard* candidate : window.findChildren<ProjectCard*>()) {
+        if (candidate->projectId() == u"lap-timer"_s)
+            card = candidate;
+    }
+    QVERIFY(card);
+    findIn<QPushButton>(*card, "ProjectDetails")->click();
+
+    QCOMPARE(window.currentPage(), PageId::ProjectDetail);
+    QVERIFY(find<QAbstractButton>(window, "NavLibrary")->isChecked()); // the page it came from stays marked
+    ProjectDetailPage* detail = detailPageOf(window);
+    QVERIFY(detail);
+    QCOMPARE(detail->projectId(), u"lap-timer"_s);
+
+    // What the entry says: name, category, description, tags.
+    QCOMPARE(findIn<QLabel>(*detail, "DetailName")->text(), u"Lap Timer"_s);
+    QCOMPARE(findIn<QLabel>(*detail, "DetailCategory")->text(), u"Tools"_s);
+    QVERIFY(findIn<QLabel>(*detail, "DetailDescription")->text().contains(u"Beispielprojekt"_s));
+    bool timingChip = false;
+    for (const QLabel* label : detail->findChildren<QLabel*>())
+        timingChip = timingChip || label->text() == u"Timing"_s;
+    QVERIFY(timingChip);
+
+    // What GitHub says arrives a moment later: newest version, size, date and changelog.
+    QCOMPARE(findIn<QLabel>(*detail, "DetailInstalledVersion")->text(), u"Nicht installiert"_s);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findIn<QLabel>(*detail, "DetailLatestVersion")->text().startsWith(u"2.0.0"_s), 10000);
+    QCOMPARE(findIn<QLabel>(*detail, "DetailDownloadSize")->text(), launcher::format::bytes(123456));
+    QVERIFY(!findIn<QLabel>(*detail, "DetailPublished")->text().isEmpty());
+    QVERIFY(findIn<QLabel>(*detail, "DetailPublished")->text() != u"–"_s);
+    QVERIFY(
+        findIn<QPlainTextEdit>(*detail, "DetailNotes")->toPlainText().contains(u"Neues Fahrzeugmodell"_s));
+    QVERIFY(!findIn<QLabel>(*detail, "DetailProblem")->isVisible());
+
+    // The link goes to the repository of the entry, built from its two names.
+    QCOMPARE(findIn<QLabel>(*detail, "DetailRepository")->text(), u"KERSEX/Repo-lap-timer"_s);
+    QCOMPARE(findIn<QPushButton>(*detail, "DetailGitHub")->toolTip(),
+        u"https://github.com/KERSEX/Repo-lap-timer"_s);
+
+    // The same buttons as on the card.
+    QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Installieren"_s);
+    saveScreenshot(window, u"project-detail"_s);
+
+    // "Zurück" leads to where the page was opened from.
+    findIn<QPushButton>(*detail, "DetailBack")->click();
+    QCOMPARE(window.currentPage(), PageId::Library);
+}
+
+void UiSmokeTests::detailPageOfAnInstalledProjectShowsTheUpdateAndTheMode()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues Fahrzeugmodell"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showProject(u"lap-timer"_s);
+    ProjectDetailPage* detail = detailPageOf(window);
+    QVERIFY(detail);
+
+    QCOMPARE(findIn<QLabel>(*detail, "DetailInstalledVersion")->text(), u"1.4.2"_s);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findIn<QLabel>(*detail, "DetailLatestVersion")->text().contains(u"Update verfügbar"_s), 10000);
+    QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Starten"_s);
+    QVERIFY(findIn<QPushButton>(*detail, "ProjectUninstall")->isVisible());
+
+    // The update setting can be changed right here.
+    auto* mode = findIn<ComboBox>(*detail, "ProjectUpdateMode");
+    QVERIFY(mode && mode->isVisible());
+    QCOMPARE(m_settings->updateMode(u"lap-timer"_s), launcher::UpdateMode::Manual);
+    choose(mode, u"Updates: Automatisch"_s);
+    QCOMPARE(m_settings->updateMode(u"lap-timer"_s), launcher::UpdateMode::Automatic);
+
+    // As on the card (D-36): switching to "automatic" starts the update that is known, and the
+    // page shows the work. The user can stop it.
+    auto* primary = findIn<QPushButton>(*detail, "ProjectPrimary");
+    QTRY_COMPARE_WITH_TIMEOUT(primary->text(), u"Abbrechen"_s, 5000);
+    primary->click();
+    QTRY_COMPARE_WITH_TIMEOUT(primary->text(), u"Starten"_s, 10000);
+
+    // The page follows the installation: when the project is gone, it says so.
+    QVERIFY(m_installed->remove(u"lap-timer"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        findIn<QLabel>(*detail, "DetailInstalledVersion")->text(), u"Nicht installiert"_s, 5000);
+    QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Installieren"_s);
+}
+
+void UiSmokeTests::detailPageExplainsAFailedLookupAndCanAskAgain()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    // No release list: the server answers with something that is no JSON.
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showProject(u"lap-timer"_s);
+    ProjectDetailPage* detail = detailPageOf(window);
+    QVERIFY(detail);
+
+    auto* problem = findIn<QLabel>(*detail, "DetailProblem");
+    QTRY_VERIFY_WITH_TIMEOUT(problem->isVisible(), 10000);
+    QVERIFY2(problem->text().contains(u"nicht lesbar"_s), qPrintable(problem->text()));
+    QCOMPARE(findIn<QLabel>(*detail, "DetailLatestVersion")->text(), u"unbekannt"_s);
+    // Installing is still offered: that asks GitHub again by itself.
+    QCOMPARE(findIn<QPushButton>(*detail, "ProjectPrimary")->text(), u"Installieren"_s);
+    saveScreenshot(window, u"project-detail-error"_s);
+
+    // The answer is there now: "Neu abfragen" asks again, and the problem is gone.
+    m_releaseBody = releaseListFor(u"3.1.0"_s, u"- Alles neu"_s);
+    auto* refresh = findIn<QPushButton>(*detail, "DetailRefresh");
+    QTRY_VERIFY_WITH_TIMEOUT(refresh->isEnabled(), 5000);
+    refresh->click();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findIn<QLabel>(*detail, "DetailLatestVersion")->text().startsWith(u"3.1.0"_s), 10000);
+    QVERIFY(!problem->isVisible());
+}
+
+void UiSmokeTests::detailPageDoesNotAskAgainForAFreshAnswer()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showProject(u"lap-timer"_s);
+    ProjectDetailPage* detail = detailPageOf(window);
+    QVERIFY(detail);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findIn<QLabel>(*detail, "DetailLatestVersion")->text().startsWith(u"2.0.0"_s), 10000);
+    QCOMPARE(m_server->requestCount(), 1);
+
+    // Back and forth within minutes: the page shows what it has, GitHub's budget is spared.
+    findIn<QPushButton>(*detail, "DetailBack")->click();
+    window.showProject(u"lap-timer"_s);
+    QTest::qWait(300);
+    QCOMPARE(m_server->requestCount(), 1);
+    QVERIFY(findIn<QLabel>(*detail, "DetailLatestVersion")->text().startsWith(u"2.0.0"_s));
+
+    // Another project is another question.
+    window.showProject(u"pit-radio"_s);
+    QCOMPARE(detail->projectId(), u"pit-radio"_s);
+    QTRY_VERIFY_WITH_TIMEOUT(m_server->requestCount() >= 2, 5000);
+
+    // An id that is not in the list opens nothing.
+    window.showProject(u"nothing"_s);
+    QCOMPARE(detail->projectId(), u"pit-radio"_s);
+}
+
+// ---- The dashboard -----------------------------------------------------------------------
+
+namespace {
+
+/// The rows of a dashboard section, as "name | detail" texts.
+QStringList dashboardRows(QWidget& window, const char* section)
+{
+    QStringList rows;
+    auto* card = window.findChild<QFrame*>(QLatin1StringView(section));
+    if (!card)
+        return rows;
+    for (const QWidget* row : card->findChildren<QWidget*>(u"DashboardRow"_s)) {
+        const auto* name = row->findChild<QLabel*>(u"DashboardRowName"_s);
+        const auto* detail = row->findChild<QLabel*>(u"DashboardRowDetail"_s);
+        rows.append(name->text() + u" | "_s + detail->text());
+    }
+    return rows;
+}
+
+} // namespace
+
+void UiSmokeTests::dashboardListsInstalledProjectsUpdatesAndRecentStarts()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"1.0.0"_s));
+    m_installed->recordStart(u"pit-radio"_s, QDateTime::fromString(u"2026-11-09T10:00:00Z"_s, Qt::ISODate));
+    m_installed->recordStart(u"lap-timer"_s, QDateTime::fromString(u"2026-11-10T10:00:00Z"_s, Qt::ISODate));
+    m_releaseBody = releaseListFor(u"2.0.0"_s, u"- Neues"_s); // only lap-timer's file fits
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QSignalSpy checked(m_updates.get(), &launcher::ProjectUpdateManager::checkFinished);
+    m_updates->checkAll();
+    QVERIFY(checked.wait(10000));
+    QCOMPARE(window.currentPage(), PageId::Dashboard);
+
+    // Installed: both, by name, with their version.
+    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardInstalled").size(), 2, 5000);
+    const QStringList installed = dashboardRows(window, "DashboardInstalled");
+    QVERIFY2(installed.at(0).startsWith(u"Lap Timer | Version 1.4.2"_s), qPrintable(installed.at(0)));
+    QVERIFY2(installed.at(1).startsWith(u"Pit Radio | Version 1.0.0"_s), qPrintable(installed.at(1)));
+
+    // The update that is known.
+    const QStringList updates = dashboardRows(window, "DashboardUpdates");
+    QCOMPARE(updates.size(), 1);
+    QVERIFY2(updates.first().startsWith(u"Lap Timer | Version 1.4.2 → 2.0.0"_s), qPrintable(updates.first()));
+
+    // Started lately: the newest start first.
+    const QStringList recent = dashboardRows(window, "DashboardRecent");
+    QCOMPARE(recent.size(), 2);
+    QVERIFY(recent.at(0).startsWith(u"Lap Timer | Zuletzt gestartet"_s));
+    QVERIFY(recent.at(1).startsWith(u"Pit Radio | Zuletzt gestartet"_s));
+
+    // Featured projects of the list, installed or not.
+    const QStringList featured = dashboardRows(window, "DashboardFeatured");
+    QCOMPARE(featured.size(), 2);
+    QVERIFY2(
+        featured.at(0).startsWith(u"KERS Overlay | Tools · nicht installiert"_s), qPrintable(featured.at(0)));
+    QVERIFY(featured.at(1).startsWith(u"Setup Sharing | Community · nicht installiert"_s));
+    saveScreenshot(window, u"dashboard-projects"_s);
+
+    // "Details" of a row opens the page of that project; "Zurück" leads back to the dashboard.
+    auto* card = window.findChild<QFrame*>(u"DashboardFeatured"_s);
+    card->findChild<QPushButton*>(u"DashboardDetails"_s)->click();
+    QCOMPARE(window.currentPage(), PageId::ProjectDetail);
+    QCOMPARE(detailPageOf(window)->projectId(), u"kers-overlay"_s);
+    QVERIFY(find<QAbstractButton>(window, "NavDashboard")->isChecked());
+    findIn<QPushButton>(*detailPageOf(window), "DetailBack")->click();
+    QCOMPARE(window.currentPage(), PageId::Dashboard);
+
+    // A change shows up without a new window: a project is removed.
+    QVERIFY(m_installed->remove(u"pit-radio"_s));
+    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardInstalled").size(), 1, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(dashboardRows(window, "DashboardRecent").size(), 1, 5000);
+}
+
+void UiSmokeTests::dashboardWithoutProjectsSaysSo()
+{
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    // Nothing installed, nothing in the list: each place says what is missing, and the
+    // sections that would be empty are not shown at all.
+    auto* installed = window.findChild<QFrame*>(u"DashboardInstalled"_s);
+    QVERIFY(installed->findChild<QLabel*>(u"DashboardEmpty"_s)
+            ->text()
+            .contains(u"Noch keine Projekte installiert"_s));
+    QVERIFY(window.findChild<QFrame*>(u"DashboardRecent"_s)
+            ->findChild<QLabel*>(u"DashboardEmpty"_s)
+            ->text()
+            .contains(u"Noch kein Projekt gestartet"_s));
+    QVERIFY(!window.findChild<QFrame*>(u"DashboardUpdates"_s)->isVisibleTo(&window));
+    QVERIFY(!window.findChild<QFrame*>(u"DashboardFeatured"_s)->isVisibleTo(&window));
+    QVERIFY(dashboardRows(window, "DashboardInstalled").isEmpty());
+
+    // The welcome offers the library.
+    QSignalSpy requested(find<QPushButton>(window, "OpenLibrary"), &QPushButton::clicked);
+    find<QPushButton>(window, "OpenLibrary")->click();
+    QCOMPARE(window.currentPage(), PageId::Library);
+    saveScreenshot(window, u"dashboard-empty"_s);
+
+    // With an installed project and no update: "all current".
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    window.showPage(PageId::Dashboard);
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QFrame*>(u"DashboardUpdates"_s)->isVisibleTo(&window), 5000);
+    QVERIFY(window.findChild<QFrame*>(u"DashboardUpdates"_s)
+            ->findChild<QLabel*>(u"DashboardEmpty"_s)
+            ->text()
+            .contains(u"aktuell"_s));
+}
+
+void UiSmokeTests::dashboardStartsAProject()
+{
+    QVERIFY(loadProjects(*m_registry, sampleProjects()));
+    QVERIFY(sleepy::install(
+        *m_layout, *m_installed, u"lap-timer"_s, u"lap-timer"_s, u"1.4.2"_s, u"lap-timer.exe"_s));
+    const QString current = m_layout->currentDir(u"lap-timer"_s);
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* card = window.findChild<QFrame*>(u"DashboardInstalled"_s);
+    auto* start = card->findChild<QPushButton*>(u"DashboardStart"_s);
+    QVERIFY(start);
+    QCOMPARE(start->text(), u"Starten"_s);
+
+    start->click();
+    // The row is built again once the program runs: its button says so and cannot be pressed.
+    QTRY_COMPARE_WITH_TIMEOUT(
+        (m_processes->refresh(), card->findChild<QPushButton*>(u"DashboardStart"_s)->text()), u"Läuft"_s,
+        10000);
+    QVERIFY(!card->findChild<QPushButton*>(u"DashboardStart"_s)->isEnabled());
+    QVERIFY(dashboardRows(window, "DashboardInstalled").first().contains(u"läuft"_s));
+
+    sleepy::stop(current);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        (m_processes->refresh(), card->findChild<QPushButton*>(u"DashboardStart"_s)->text()), u"Starten"_s,
+        10000);
+}
+
+// ---- Storage in the settings --------------------------------------------------------------
+
+namespace {
+
+bool writeBytes(const QString& path, int size)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(QByteArray(size, 'x')) == size;
+}
+
+} // namespace
+
+void UiSmokeTests::settingsShowTheStorageAndCleanUpOnRequest()
+{
+    // Some files in the places the launcher cleans, and a project that must not be touched.
+    QVERIFY(writeBytes(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s, 3000));
+    QVERIFY(writeBytes(m_paths->tempDir() + u"/download-7.part"_s, 1000));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"2.0.0"_s));
+    QVERIFY(writeBytes(m_layout->backupsDir(u"lap-timer"_s) + u"/1.0.0/lap-timer.exe"_s, 5000));
+    QVERIFY(writeBytes(m_layout->backupsDir(u"lap-timer"_s) + u"/1.1.0/lap-timer.exe"_s, 7000));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Settings);
+
+    // Measured in the background when the page is shown.
+    QTRY_COMPARE_WITH_TIMEOUT(
+        find<QLabel>(window, "UsageDownloads")->text(), launcher::format::bytes(4000), 10000);
+    QCOMPARE(find<QLabel>(window, "UsageBackups")->text(), launcher::format::bytes(12000));
+    auto* cleanDownloads = find<QPushButton>(window, "CleanDownloads");
+    auto* cleanBackups = find<QPushButton>(window, "CleanBackups");
+    QVERIFY(cleanDownloads->isEnabled());
+    QVERIFY(cleanBackups->isEnabled());
+    saveScreenshot(window, u"settings-storage"_s);
+
+    // "No" deletes nothing.
+    launcher::ui::Dialogs::StorageCleanup asked = launcher::ui::Dialogs::StorageCleanup::Backups;
+    int questions = 0;
+    launcher::ui::Dialogs::setStorageCleanupConfirmationForTests(
+        [&](launcher::ui::Dialogs::StorageCleanup what) {
+            asked = what;
+            ++questions;
+            return false;
+        });
+    cleanBackups->click();
+    QCOMPARE(questions, 1);
+    QVERIFY(QFileInfo::exists(m_layout->backupsDir(u"lap-timer"_s) + u"/1.0.0/lap-timer.exe"_s));
+
+    // "Yes" for the backups: they go, the installed version and the downloads stay.
+    launcher::ui::Dialogs::setStorageCleanupConfirmationForTests(
+        [&](launcher::ui::Dialogs::StorageCleanup what) {
+            asked = what;
+            return true;
+        });
+    cleanBackups->click();
+    QCOMPARE(asked, launcher::ui::Dialogs::StorageCleanup::Backups);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        find<QLabel>(window, "UsageBackups")->text(), launcher::format::bytes(0), 10000);
+    QVERIFY(!QFileInfo::exists(m_layout->backupsDir(u"lap-timer"_s) + u"/1.0.0"_s));
+    QVERIFY(QFileInfo::exists(m_layout->executablePath(*m_installed->get(u"lap-timer"_s))));
+    QVERIFY(QFileInfo::exists(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s));
+    QVERIFY(!cleanBackups->isEnabled()); // nothing left to delete
+    QVERIFY(!find<QLabel>(window, "UsageProblem")->isVisible());
+
+    // "Yes" for the downloads: downloads/ and temp/ are emptied, the folders stay.
+    cleanDownloads->click();
+    QCOMPARE(asked, launcher::ui::Dialogs::StorageCleanup::DownloadsAndTemp);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        find<QLabel>(window, "UsageDownloads")->text(), launcher::format::bytes(0), 10000);
+    QVERIFY(QDir(m_paths->downloadsDir()).isEmpty());
+    QVERIFY(QDir(m_paths->tempDir()).isEmpty());
+    QVERIFY(QFileInfo(m_paths->downloadsDir()).isDir());
+    QVERIFY(QFileInfo(m_paths->tempDir()).isDir());
+    QVERIFY(
+        QFileInfo::exists(m_layout->executablePath(*m_installed->get(u"lap-timer"_s)))); // still installed
+
+    launcher::ui::Dialogs::setStorageCleanupConfirmationForTests({});
+}
+
+void UiSmokeTests::settingsDoNotCleanUpWhileSomethingRuns()
+{
+    QVERIFY(writeBytes(m_paths->downloadsDir() + u"/tool/Tool-1.0.0.zip"_s, 3000));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"2.0.0"_s));
+    QVERIFY(writeBytes(m_layout->backupsDir(u"lap-timer"_s) + u"/1.0.0/lap-timer.exe"_s, 5000));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.showPage(PageId::Settings);
+    auto* cleanDownloads = find<QPushButton>(window, "CleanDownloads");
+    auto* cleanBackups = find<QPushButton>(window, "CleanBackups");
+    QTRY_VERIFY_WITH_TIMEOUT(cleanDownloads->isEnabled() && cleanBackups->isEnabled(), 10000);
+
+    // A download is under way: the transfer's partial file lives in temp/, so nothing is cleaned up.
+    const launcher::DownloadId id =
+        m_downloads->enqueue(downloadRequest(u"/slow"_s, u"Slow.zip"_s, 600 * 1024, u"KERS Overlay 1.2.0"_s));
+    QTRY_VERIFY_WITH_TIMEOUT(m_downloads->download(id)->bytesReceived > 0, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!cleanDownloads->isEnabled() && !cleanBackups->isEnabled(), 5000);
+    QVERIFY(!cleanDownloads->toolTip().isEmpty());
+
+    // Whatever the buttons say, a call that gets through asks nothing and deletes nothing.
+    int questions = 0;
+    launcher::ui::Dialogs::setStorageCleanupConfirmationForTests([&](launcher::ui::Dialogs::StorageCleanup) {
+        ++questions;
+        return true;
+    });
+    cleanDownloads->click();
+    cleanBackups->click();
+    QCOMPARE(questions, 0);
+    QVERIFY(QFileInfo::exists(m_layout->backupsDir(u"lap-timer"_s) + u"/1.0.0/lap-timer.exe"_s));
+
+    // When the download is over, the buttons work again.
+    m_downloads->cancel(id);
+    QTRY_VERIFY_WITH_TIMEOUT(cleanBackups->isEnabled(), 10000);
+    launcher::ui::Dialogs::setStorageCleanupConfirmationForTests({});
 }
 
 QTEST_MAIN(UiSmokeTests)

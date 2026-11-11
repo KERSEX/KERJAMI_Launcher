@@ -22,6 +22,10 @@ class LibraryPage : public Page {
 public:
     explicit LibraryPage(const AppContext& context, QWidget* parent = nullptr);
 
+signals:
+    /// The user wants the detail page of a project.
+    void projectDetailsRequested(const QString& projectId);
+
 private:
     void onRegistryChanged();
     void rebuildList();

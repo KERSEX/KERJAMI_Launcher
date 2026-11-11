@@ -115,6 +115,8 @@ qt_add_library(launcher_core STATIC
     src/installer/Installer.cpp
     src/installer/Installer.h
     src/installer/LibraryLayout.cpp
+    src/installer/Storage.cpp
+    src/installer/Storage.h
     src/installer/LibraryLayout.h
     src/installer/ProjectLauncher.cpp
     src/installer/ProjectLauncher.h
@@ -173,6 +175,10 @@ qt_add_library(launcher_ui STATIC
     src/ui/Page.h
     src/ui/ProjectCard.cpp
     src/ui/ProjectCard.h
+    src/ui/ProjectControls.cpp
+    src/ui/ProjectControls.h
+    src/ui/ProjectDetailPage.cpp
+    src/ui/ProjectDetailPage.h
     src/ui/SettingsPage.cpp
     src/ui/SettingsPage.h
     src/ui/Theme.cpp
