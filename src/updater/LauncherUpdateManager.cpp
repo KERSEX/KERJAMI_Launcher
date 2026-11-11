@@ -8,6 +8,7 @@
 #include "github/ReleaseParser.h"
 #include "installer/FileOps.h"
 #include "security/HashVerifier.h"
+#include "updater/LauncherUpdater.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -37,13 +38,15 @@ LauncherUpdateManager::LauncherUpdateManager(GitHubClient& client, ReleaseManage
     , m_paths(paths)
     , m_currentVersion(branding::version())
     , m_runningFile(QFileInfo(QCoreApplication::applicationFilePath()).fileName())
-    , m_expectations {branding::productName(), branding::executableFileName(), branding::updaterFileName()}
+    , m_expectations {branding::productName(), branding::executableFileName()}
     , m_processId(QCoreApplication::applicationPid())
 {
     qRegisterMetaType<launcher::PackageResult>();
 
     m_startUpdater = [](const QString& program, const QString& jobFile) {
-        return QProcess::startDetached(program, {u"--job"_s, jobFile}, QFileInfo(program).absolutePath());
+        return QProcess::startDetached(program,
+            {QString::fromLatin1(LauncherUpdater::modeFlag()), u"--job"_s, jobFile},
+            QFileInfo(program).absolutePath());
     };
     m_info.currentVersion = m_currentVersion;
 
@@ -426,17 +429,21 @@ void LauncherUpdateManager::apply()
         return;
     }
 
-    // The updater runs from a copy in temp/, so that its own file can be replaced too.
+    // The update run is a copy of this very program in temp/, started in its update mode:
+    // a running file cannot be replaced, and the copy is not the file that is replaced.
+    // It is this version that does it, not the new one: this one is known to start.
     const QString version = m_pending->selection.release.version.toString();
     const QString jobDir = m_paths.tempDir() + u"/updater-"_s + version;
     QString error;
     if (!FileOps::removeTree(jobDir, &error) || !QDir().mkpath(jobDir)) {
-        handoffFailure(2, u"the folder for the updater cannot be prepared"_s);
+        handoffFailure(2, u"the folder for the update run cannot be prepared"_s);
         return;
     }
-    const QString updaterCopy = jobDir + u'/' + m_expectations.updaterFile;
-    if (!QFile::copy(m_pending->stagingDir + u'/' + m_pending->manifest.updater, updaterCopy)) {
-        handoffFailure(2, u"the updater program cannot be copied"_s);
+    const QString source =
+        m_updaterSource.isEmpty() ? QCoreApplication::applicationFilePath() : m_updaterSource;
+    const QString updaterCopy = jobDir + u'/' + m_expectations.launcherFile;
+    if (!QFile::copy(source, updaterCopy)) {
+        handoffFailure(2, u"the program cannot be copied for the update run"_s);
         return;
     }
 
@@ -446,7 +453,6 @@ void LauncherUpdateManager::apply()
     job.fromVersion = m_currentVersion;
     job.toVersion = version;
     job.launcherFile = m_expectations.launcherFile;
-    job.updaterFile = m_expectations.updaterFile;
     job.product = m_expectations.product;
     job.launcherProcessId = m_processId;
     const QString jobFile = jobDir + u"/job.json"_s;
@@ -456,11 +462,11 @@ void LauncherUpdateManager::apply()
     }
 
     if (!m_startUpdater(updaterCopy, jobFile)) {
-        handoffFailure(3, u"the updater program cannot be started"_s);
+        handoffFailure(3, u"the update run cannot be started"_s);
         return;
     }
 
-    qCInfo(lcUpdate).noquote() << "Handed the update to the updater; the launcher closes now";
+    qCInfo(lcUpdate).noquote() << "Handed the update to the update run; the launcher closes now";
     setState(LauncherUpdateState::Applying);
     emit restartRequested();
 }

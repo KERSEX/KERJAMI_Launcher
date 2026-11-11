@@ -26,6 +26,7 @@ will, tut das im Launcher selbst.
   "enabled": true,
   "featured": false,
   "release_channel": "stable",
+  "tag_prefix": "BeispielProjektV",
   "asset_pattern": "Beispiel_Projekt-Windows-x64.zip",
   "executable": "Beispiel_Projekt.exe",
   "install_directory": "Beispiel_Projekt"
@@ -46,6 +47,7 @@ will, tut das im Launcher selbst.
 | `enabled` | ja | `true` zeigt das Projekt an, `false` blendet es aus. |
 | `featured` | nein | `true` hebt das Projekt im Dashboard hervor. Standard `false`. |
 | `release_channel` | nein | Version 1 kennt nur `stable`. Das ist auch der Standard. Pre-Releases werden nicht berücksichtigt. |
+| `tag_prefix` | nein | Text, mit dem die Release-Tags des Projekts vor der Versionsnummer beginnen, zum Beispiel `KERS_SubsystemsV` für das Tag `KERS_SubsystemsV0.3.1`. Der Launcher schneidet ihn ab und liest den Rest als Version. Er besteht aus 1 bis 32 Buchstaben, Ziffern, `.`, `_` oder `-` und beginnt mit einem Buchstaben, ohne `/`. Groß- und Kleinschreibung zählt. Ohne dieses Feld ist das ganze Tag die Version (`1.2.0` oder `v1.2.0`). Mit dem Feld zählen nur Tags, die so beginnen. |
 | `asset_pattern` | ja | Dateiname des ZIP-Archivs im GitHub-Release. Ein `*` steht für beliebige Zeichen, zum Beispiel `Projekt-*-Windows-x64.zip`. Das Muster muss auf `.zip` enden und darf keinen Pfad enthalten. |
 | `executable` | ja | Pfad der Start-Datei innerhalb des Archivs, mit `/` als Trenner und auf `.exe` endend. Absolute Pfade und `..` sind nicht erlaubt. |
 | `install_directory` | ja | Ordnername unterhalb der Projektbibliothek des Launchers. Buchstaben, Ziffern, `_`, `-` und `.`, höchstens 64 Zeichen. Jedes Projekt braucht einen eigenen Ordner. |
@@ -63,6 +65,7 @@ ein Eintrag unter anderem bei:
   Windows-Name ist (`CON`, `NUL`, `COM1` und so weiter),
 - einem unbekannten `release_channel`,
 - einem `asset_pattern` oder einer `executable`, die aus dem erlaubten Rahmen fallen,
+- einem `tag_prefix`, der vorhanden, aber leer oder ungültig ist (fehlt das Feld, ist das in Ordnung),
 - ungültigen Zeichen in `owner` oder `repository`.
 
 Ist die ganze Datei kein gültiges JSON oder hat sie eine unbekannte `schema_version`, behält der
@@ -73,6 +76,8 @@ veröffentlicht, zum Beispiel mit einem JSON-Validator.
 
 Damit sich ein eingetragenes Projekt installieren lässt, braucht das Repository ein GitHub-Release
 (kein Pre-Release), dessen Tag eine Version nach Semantic Versioning enthält, zum Beispiel
-`v1.2.0`. Das Release enthält ein ZIP-Archiv, das zu `asset_pattern` passt. Der Launcher prüft das
+`v1.2.0`. Heißen die Tags anders (`MeinProjektV1.2.0`), trägt das Projekt den Anfang als
+`tag_prefix` ein (`MeinProjektV`). Die Versionsnummer danach muss streng aus drei Zahlen bestehen
+(`1.2.0`, nicht `1.2` und nicht `01.2.0`); Tags, bei denen das nicht stimmt, werden übergangen. Das Release enthält ein ZIP-Archiv, das zu `asset_pattern` passt. Der Launcher prüft das
 Archiv gegen den SHA-256-Wert, den GitHub für das Asset ausweist. Ohne vertrauenswürdige Prüfsumme
 wird nichts installiert.

@@ -52,10 +52,10 @@ function(launcher_executable_defaults target)
     endif()
 endfunction()
 
-# --- Base: the parts the updater needs as well -----------------------------------
-# Qt Core only. The updater replaces the launcher's files; it has no use for the
-# network, and a small program with few imports is also less likely to be taken
-# for something it is not by a virus scanner's heuristics (docs/03-entscheidungen.md, D-40).
+# --- Base: Qt Core only ---------------------------------------------------------
+# Everything the update run needs (D-40). The launcher program carries the updater as
+# a mode (--apply-update), so it is one file; keeping the update code free of network and
+# widgets makes clear that the run touches nothing but files.
 qt_add_library(launcher_base STATIC
     src/core/JsonFile.cpp
     src/core/JsonFile.h
@@ -73,6 +73,8 @@ qt_add_library(launcher_base STATIC
     src/security/ArchiveValidator.h
     src/security/HashVerifier.cpp
     src/security/HashVerifier.h
+    src/updater/LauncherUpdater.cpp
+    src/updater/LauncherUpdater.h
     src/updater/UpdateManifest.cpp
     src/updater/UpdateManifest.h
     src/updater/UpdateTransaction.cpp
@@ -199,9 +201,6 @@ set(LAUNCHER_ICON_FILE "${CMAKE_SOURCE_DIR}/resources/images/app.ico")
 set(LAUNCHER_RC_NAME "${BRAND_EXECUTABLE_NAME}")
 set(LAUNCHER_RC_DESCRIPTION "${BRAND_DISPLAY_NAME}")
 configure_file(src/app/launcher.rc.in "${LAUNCHER_GENERATED_DIR}/launcher.rc" @ONLY)
-set(LAUNCHER_RC_NAME "${BRAND_UPDATER_NAME}")
-set(LAUNCHER_RC_DESCRIPTION "${BRAND_DISPLAY_NAME} Updater")
-configure_file(src/app/launcher.rc.in "${LAUNCHER_GENERATED_DIR}/updater.rc" @ONLY)
 set_source_files_properties("${LAUNCHER_GENERATED_DIR}/launcher.rc"
     PROPERTIES OBJECT_DEPENDS "${LAUNCHER_ICON_FILE}")
 
@@ -214,22 +213,6 @@ qt_add_executable(launcher WIN32
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "${BRAND_EXECUTABLE_NAME}")
 target_link_libraries(launcher PRIVATE launcher_ui)
 launcher_executable_defaults(launcher)
-
-# --- Updater executable ---------------------------------------------------------
-# Replaces the launcher's program files after the launcher has closed (D-40). It
-# runs from a copy in temp/, so its own file can be replaced too. It needs the
-# base library only: no windows, no network.
-set_source_files_properties("${LAUNCHER_GENERATED_DIR}/updater.rc"
-    PROPERTIES OBJECT_DEPENDS "${LAUNCHER_ICON_FILE}")
-qt_add_executable(launcher_updater WIN32
-    updater/LauncherUpdater.cpp
-    updater/LauncherUpdater.h
-    updater/main.cpp
-    "${LAUNCHER_GENERATED_DIR}/updater.rc"
-)
-set_target_properties(launcher_updater PROPERTIES OUTPUT_NAME "${BRAND_UPDATER_NAME}")
-target_link_libraries(launcher_updater PRIVATE launcher_base)
-launcher_executable_defaults(launcher_updater)
 
 # --- Tests --------------------------------------------------------------------
 include(CTest)

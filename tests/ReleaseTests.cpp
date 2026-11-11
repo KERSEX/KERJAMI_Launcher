@@ -116,6 +116,7 @@ private slots:
     void unusableAssetsAreLeftOut_data();
     void unusableAssetsAreLeftOut();
     void draftsPreReleasesAndOddTagsAreSkipped();
+    void tagPrefixSelectsTagsAndReadsTheVersionAfterIt();
     void answersThatAreNoReleaseList_data();
     void answersThatAreNoReleaseList();
     void entriesThatAreNotObjectsAreSkipped();
@@ -132,6 +133,7 @@ private slots:
     void managerSelectsTheNewestRelease();
     void managerOffersAChecksumFileOnlyWithoutDigest();
     void downloadAddressIsBuiltNotTaken();
+    void managerReadsTagsWithAPrefixAndKeepsTheRawTag();
     void tagWithBuildMetadataGivesAValidAddress();
     void managerReportsNoStableRelease();
     void newestReleaseWithoutTheFileIsNotReplacedByAnOlderOne();
@@ -641,6 +643,70 @@ void ReleaseTests::downloadAddressIsBuiltNotTaken()
     QVERIFY(!url.toString().contains(u"evil"_s));
 }
 
+void ReleaseTests::tagPrefixSelectsTagsAndReadsTheVersionAfterIt()
+{
+    // Tags as the team's projects name them (docs/03-entscheidungen.md, E-07).
+    const QJsonArray assets {asset(u"Demo.zip"_s)};
+    const QByteArray json = list({
+        release(u"TankstellenmealV0.12.3"_s, assets),
+        release(u"TankstellenmealV0.12.2"_s, assets),
+        release(u"TankstellenmealV0.12"_s, assets),        // two numbers: not a version
+        release(u"TankstellenmealV012.2"_s, assets),       // leading zero: not a version
+        release(u"tankstellenmealV0.13.0"_s, assets),      // the prefix is case sensitive
+        release(u"v9.9.9"_s, assets),                      // no prefix at all
+        release(u"TankstellenmealV0.13.0-rc.1"_s, assets), // not stable
+        release(u"TankstellenmealV"_s, assets),            // nothing after the prefix
+    });
+
+    const ReleaseListResult result = RP::parseList(json, u"TankstellenmealV"_s);
+    QVERIFY(result.ok);
+    QCOMPARE(result.releases.size(), 2);
+    QCOMPARE(result.releases.at(0).tag, u"TankstellenmealV0.12.3"_s); // the raw tag stays
+    QCOMPARE(result.releases.at(0).version.toString(), u"0.12.3"_s);
+    QCOMPARE(result.releases.at(1).version.toString(), u"0.12.2"_s);
+    QCOMPARE(result.skipped, 6);
+    QCOMPARE(RP::latest(result.releases)->tag, u"TankstellenmealV0.12.3"_s);
+
+    // Without a prefix only the plain "v9.9.9" is a version; the others are not.
+    const ReleaseListResult plain = RP::parseList(json);
+    QVERIFY(plain.ok);
+    QCOMPARE(plain.releases.size(), 1);
+    QCOMPARE(plain.releases.first().tag, u"v9.9.9"_s);
+
+    // A "v" after the prefix is allowed, as it is without one.
+    const ReleaseListResult withV = RP::parseList(
+        list({release(u"KERS_SubsystemsV0.3.1"_s, assets), release(u"KERS_Subsystemsv0.2.0"_s, assets)}),
+        u"KERS_Subsystems"_s);
+    QCOMPARE(withV.releases.size(), 2);
+    QCOMPARE(withV.releases.at(0).version.toString(), u"0.3.1"_s);
+
+    // A project with a prefix ignores a tag that lacks it, even a plain "v1.0.0".
+    const ReleaseListResult other = RP::parseList(list({release(u"v1.0.0"_s, assets)}), u"DemoV"_s);
+    QVERIFY(other.releases.isEmpty());
+}
+
+void ReleaseTests::managerReadsTagsWithAPrefixAndKeepsTheRawTag()
+{
+    m_next = body(list({
+        release(u"DemoV1.1.0"_s, {asset(u"Demo-1.1.0.zip"_s, 2000, kDigest)}),
+        release(u"DemoV1.2.0"_s, {asset(u"Demo-1.2.0.zip"_s, 3000, kDigest)}),
+        release(u"v9.0.0"_s, {asset(u"Demo-9.0.0.zip"_s)}), // another naming: not this project's release
+    }));
+
+    auto manager = makeManager();
+    Project project = demoProject();
+    project.tagPrefix = u"DemoV"_s;
+    const Outcome outcome = fetch(*manager, project);
+
+    QVERIFY(outcome.ready);
+    QCOMPARE(outcome.selection.release.tag, u"DemoV1.2.0"_s);
+    QCOMPARE(outcome.selection.release.version.toString(), u"1.2.0"_s);
+    QCOMPARE(outcome.selection.asset.name, u"Demo-1.2.0.zip"_s);
+    // The address is built with the tag as GitHub knows it, prefix included.
+    QCOMPARE(
+        outcome.selection.downloadUrl.path(), u"/KERSEX/Demo/releases/download/DemoV1.2.0/Demo-1.2.0.zip"_s);
+}
+
 void ReleaseTests::tagWithBuildMetadataGivesAValidAddress()
 {
     m_next = body(list({release(u"v1.0.0+build.7"_s, {asset(u"Demo-1.0.0.zip"_s)})}));
@@ -711,6 +777,9 @@ void ReleaseTests::invalidProjectsAreRejectedWithoutARequest_data()
     QTest::newRow("id with capital") << u"id"_s << u"Demo"_s;
     QTest::newRow("pattern is not a zip") << u"assetPattern"_s << u"Demo.exe"_s;
     QTest::newRow("pattern with path") << u"assetPattern"_s << u"../Demo.zip"_s;
+    QTest::newRow("tag prefix with slash") << u"tagPrefix"_s << u"a/b"_s;
+    QTest::newRow("tag prefix starting with a digit") << u"tagPrefix"_s << u"1v"_s;
+    QTest::newRow("tag prefix with a query") << u"tagPrefix"_s << u"v?x=1"_s;
 }
 
 void ReleaseTests::invalidProjectsAreRejectedWithoutARequest()
@@ -725,6 +794,8 @@ void ReleaseTests::invalidProjectsAreRejectedWithoutARequest()
         project.repository = value;
     else if (field == u"id"_s)
         project.id = value;
+    else if (field == u"tagPrefix"_s)
+        project.tagPrefix = value;
     else
         project.assetPattern = value;
 

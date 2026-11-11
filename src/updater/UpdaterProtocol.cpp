@@ -37,8 +37,7 @@ QJsonObject UpdaterJob::toJson() const
 {
     return {{u"schema_version"_s, kSchemaVersion}, {u"root_dir"_s, rootDir}, {u"staging_dir"_s, stagingDir},
         {u"from_version"_s, fromVersion}, {u"to_version"_s, toVersion}, {u"launcher_file"_s, launcherFile},
-        {u"updater_file"_s, updaterFile}, {u"product"_s, product},
-        {u"launcher_process_id"_s, static_cast<double>(launcherProcessId)},
+        {u"product"_s, product}, {u"launcher_process_id"_s, static_cast<double>(launcherProcessId)},
         {u"wait_timeout_ms"_s, waitTimeoutMs}, {u"start_launcher_after"_s, startLauncherAfter}};
 }
 
@@ -53,15 +52,14 @@ std::optional<UpdaterJob> UpdaterJob::fromJson(const QJsonObject& object)
     job.fromVersion = object.value(u"from_version"_s).toString();
     job.toVersion = object.value(u"to_version"_s).toString();
     job.launcherFile = object.value(u"launcher_file"_s).toString();
-    job.updaterFile = object.value(u"updater_file"_s).toString();
     job.product = object.value(u"product"_s).toString();
     job.launcherProcessId = static_cast<qint64>(object.value(u"launcher_process_id"_s).toDouble());
     job.waitTimeoutMs = object.value(u"wait_timeout_ms"_s).toInt(kDefaultWaitTimeoutMs);
     job.startLauncherAfter = object.value(u"start_launcher_after"_s).toBool(true);
 
     const bool usable = !job.rootDir.isEmpty() && !job.stagingDir.isEmpty() && !job.launcherFile.isEmpty()
-        && !job.updaterFile.isEmpty() && !job.product.isEmpty() && !job.toVersion.isEmpty()
-        && job.launcherProcessId >= 0 && job.waitTimeoutMs >= 0 && job.waitTimeoutMs <= 10 * 60 * 1000;
+        && !job.product.isEmpty() && !job.toVersion.isEmpty() && job.launcherProcessId >= 0
+        && job.waitTimeoutMs >= 0 && job.waitTimeoutMs <= 10 * 60 * 1000;
     if (!usable)
         return std::nullopt;
     return job;

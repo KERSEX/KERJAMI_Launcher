@@ -22,14 +22,11 @@ sicheres Entpacken, Staging mit Backup und Rollback, Deinstallation und Start. P
 der Bibliothek installiert, gestartet und entfernt. Der Launcher erkennt laufende Projekte und
 prüft installierte Projekte auf neue Versionen: je Projekt manuell (Hinweis und Rückfrage) oder
 automatisch (wird installiert, sobald das Projekt geschlossen ist). Der Launcher aktualisiert sich
-selbst: Er lädt das neue Release, prüft es gegen Prüfsumme und Manifest und übergibt an
-`LauncherUpdater.exe`, die die Programmdateien nach dem Beenden in einer Transaktion mit Backup und
-Rollback austauscht und den Launcher neu startet. Offen sind die UI-Fertigstellung (Phase 7) und das
-portable Release (Phase 8). Details stehen in
-[docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
-
-Bekanntes Problem: Windows Defender meldet die nicht signierte `LauncherUpdater.exe` fälschlich als
-Schadsoftware. Siehe [docs/03-entscheidungen.md](docs/03-entscheidungen.md), „Bekannte Grenzen“.
+selbst: Er lädt das neue Release, prüft es gegen Prüfsumme und Manifest und übergibt an eine Kopie
+seiner selbst (`KERJAMI_Launcher.exe --apply-update`), die die Programmdateien nach dem Beenden in einer
+Transaktion mit Backup und Rollback austauscht und den Launcher neu startet. Das Programm ist eine
+einzige Datei. Offen sind die UI-Fertigstellung (Phase 7) und das portable Release (Phase 8). Details
+stehen in [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 ## Bauen
 
@@ -44,7 +41,7 @@ Entwickelt wird mit statischem Qt 6.11.2 und llvm-mingw (clang).
 .\scripts\build.ps1 -Test
 ```
 
-Das Ergebnis liegt in `build\release\bin\KERJAMI.exe`. Dieser Ordner ist während der
+Das Ergebnis liegt in `build\release\bin\KERJAMI_Launcher.exe`. Dieser Ordner ist während der
 Entwicklung zugleich der portable Programmordner: Einstellungen, Logs und Bibliothek entstehen
 neben der EXE.
 
@@ -73,7 +70,7 @@ Weitere Optionen: `-Config Debug`, `-Clean`, `-QtDir <Pfad>`, `-ToolchainDir <Pf
 | `ProcessTests` | Start, Mehrfachstart, Prozessende, von außen gestartete Projekte, Nachkommen |
 | `UpdateTests` | Update-Prüfung, manuell und automatisch, laufende Projekte, Fehler, Warteschlange |
 | `UpdateTransactionTests` | Manifest-Parser, Austausch der Programmdateien mit Backup, Rollback, Absturz mittendrin und Wiederherstellung |
-| `UpdaterTests` | Die echte `LauncherUpdater.exe`: Austausch, Warten auf den Launcher, Ablehnung, Bericht, Neustart |
+| `UpdaterTests` | Die echte `KERJAMI_Launcher.exe` im Austausch-Modus: Austausch, Warten auf den Launcher, Ablehnung, Bericht, Neustart |
 | `LauncherUpdateTests` | Launcher-Update: Prüfung, feindliche Pakete, Abbruch, Übergabe, Selbstupdate von Anfang bis Ende |
 | `UiSmokeTests` | Navigation, Einstellungen, Bibliothek mit Projektkarten und Update-Anzeige, Downloads-Seite, Launcher-Update |
 
@@ -92,7 +89,6 @@ src/security/          SHA-256, ZIP-Leser, Archiv-Prüfung
 src/installer/         Installer, Deinstallation, Liste der Installationen, Start
 src/process/           Prozessüberwachung
 src/updater/           Update-Prüfung der Projekte, Selbstupdate des Launchers, Manifest, Austausch
-updater/               LauncherUpdater.exe (nur Qt Core, ohne Fenster und Netzwerk)
 src/models/            Datentypen
 src/ui/                Hauptfenster, Seiten, Controls, Theme
 resources/images/      Logo und Icons (erzeugt aus logo-source.png)
@@ -105,8 +101,7 @@ docs/                  Bestandsaufnahme, Plan, Entscheidungen
 ## Portabler Programmordner
 
 ```
-KERJAMI.exe
-LauncherUpdater.exe
+KERJAMI_Launcher.exe
 launcher/     Einstellungen und Launcher-Status
 library/      installierte Projekte
 downloads/    heruntergeladene Archive bis zur Installation

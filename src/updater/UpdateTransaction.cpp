@@ -203,13 +203,8 @@ TransactionResult apply(const TransactionPlan& plan)
         return result(TransactionOutcome::Success, u"all files are in place already"_s);
 
     // The launcher program last: until then the old version can still be started.
-    // The updater program just before it.
     const QString launcher = plan.manifest.launcher.toLower();
-    const QString updater = plan.manifest.updater.toLower();
-    const auto rank = [&](const Change& change) {
-        const QString path = change.file.path.toLower();
-        return path == launcher ? 2 : (path == updater ? 1 : 0);
-    };
+    const auto rank = [&](const Change& change) { return change.file.path.toLower() == launcher ? 1 : 0; };
     std::stable_sort(
         changes.begin(), changes.end(), [&](const Change& a, const Change& b) { return rank(a) < rank(b); });
 

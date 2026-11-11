@@ -42,9 +42,11 @@ nicht mit MSVC-Binaries kompatibel. Phase 1 wurde deshalb mit llvm-mingw gebaut.
 
 Folgen des statischen Qt-Builds:
 
-- `KERJAMI.exe` enthält Qt vollständig. Es gibt keine Qt-DLLs und keine Plugin-Ordner.
+- `KERJAMI_Launcher.exe` enthält Qt vollständig. Es gibt keine Qt-DLLs und keine Plugin-Ordner.
 - `windeployqt` und `qt.conf` werden für dieses Setup nicht gebraucht.
-- Das Portable-ZIP besteht im Kern aus zwei EXE-Dateien.
+- Das Portable-ZIP besteht im Kern aus einer EXE-Datei. (Der Auftrag sah zwei vor, `KERJAMI_Launcher.exe` und
+  `LauncherUpdater.exe`. Der Austausch der Programmdateien ist seit Phase 6 eine Betriebsart von
+  `KERJAMI_Launcher.exe`, siehe `03-entscheidungen.md`, D-40.)
 
 Der Quellcode bleibt compilerneutral (C++20, CMake, MSVC-Zweig in den Compiler-Optionen), ist
 aber bisher **nur mit clang gebaut und getestet**.

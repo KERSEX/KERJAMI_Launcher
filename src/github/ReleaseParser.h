@@ -33,7 +33,12 @@ inline constexpr qint64 kMaxAssetBytes = 2LL * 1024 * 1024 * 1024;
 /// Stable means: not a draft, not marked as pre-release by GitHub, and a tag
 /// that is a version without pre-release part. An asset is taken over if it
 /// is uploaded, has a safe file name and a plausible size.
-ReleaseListResult parseList(const QByteArray& json);
+///
+/// With a @p tagPrefix a tag counts only if it starts with that text (case
+/// matters); what follows is read as the version, so "KERS_SubsystemsV0.3.1" with
+/// the prefix "KERS_SubsystemsV" is 0.3.1. Tags without the prefix are skipped.
+/// Without a prefix the whole tag is the version, with an optional "v".
+ReleaseListResult parseList(const QByteArray& json, const QString& tagPrefix = {});
 
 /// The release with the highest version. The order of the list does not
 /// matter: a later hotfix for an old version must not count as the newest.

@@ -107,7 +107,7 @@ Files snapshot(const QString& root, const QStringList& skipTop = {})
     return files;
 }
 
-const ManifestExpectations kExpect {u"KERJAMI"_s, u"KERJAMI.exe"_s, u"LauncherUpdater.exe"_s};
+const ManifestExpectations kExpect {u"KERJAMI"_s, u"KERJAMI.exe"_s};
 
 /// A valid manifest as a JSON object, for the tests that spoil one thing at a time.
 QJsonObject validManifest()
@@ -117,8 +117,7 @@ QJsonObject validManifest()
     manifest.product = u"KERJAMI"_s;
     manifest.version = u"2.0.0"_s;
     manifest.launcher = u"KERJAMI.exe"_s;
-    manifest.updater = u"LauncherUpdater.exe"_s;
-    manifest.files = {{u"KERJAMI.exe"_s, 10, sha256("exe")}, {u"LauncherUpdater.exe"_s, 5, sha256("upd")}};
+    manifest.files = {{u"KERJAMI.exe"_s, 10, sha256("exe")}, {u"Helper.dll"_s, 5, sha256("dll")}};
     return QJsonDocument::fromJson(format::toJson(manifest)).object();
 }
 
@@ -141,9 +140,8 @@ private:
     /// The files of the installed version, and the user's data around them.
     static Files oldProgram()
     {
-        return {{u"KERJAMI.exe"_s, "old launcher"}, {u"LauncherUpdater.exe"_s, "old updater"},
-            {u"extra.dll"_s, "old extra"}, {u"qt.conf"_s, "[Paths]"}, {u"obsolete.dll"_s, "obsolete"},
-            {u"resources/theme.qss"_s, "old theme"}};
+        return {{u"KERJAMI.exe"_s, "old launcher"}, {u"extra.dll"_s, "old extra"}, {u"qt.conf"_s, "[Paths]"},
+            {u"obsolete.dll"_s, "obsolete"}, {u"resources/theme.qss"_s, "old theme"}};
     }
     static Files userData()
     {
@@ -155,8 +153,8 @@ private:
     }
     static Files newProgram()
     {
-        return {{u"KERJAMI.exe"_s, "NEW launcher"}, {u"LauncherUpdater.exe"_s, "NEW updater"},
-            {u"extra.dll"_s, "NEW extra"}, {u"qt.conf"_s, "[Paths]"}, // unchanged
+        return {{u"KERJAMI.exe"_s, "NEW launcher"}, {u"extra.dll"_s, "NEW extra"},
+            {u"qt.conf"_s, "[Paths]"}, // unchanged
             {u"resources/theme.qss"_s, "NEW theme"}, {u"resources/added/new.txt"_s, "a file that is new"}};
     }
 
@@ -180,7 +178,6 @@ private:
         plan.manifest.product = u"KERJAMI"_s;
         plan.manifest.version = u"2.0.0"_s;
         plan.manifest.launcher = u"KERJAMI.exe"_s;
-        plan.manifest.updater = u"LauncherUpdater.exe"_s;
         plan.manifest.remove = remove;
         for (const auto& [path, content] : fresh) {
             [&] { QVERIFY(writeFile(staging() + u'/' + path, content)); }();
@@ -197,8 +194,8 @@ private:
     Files dataNow()
     {
         return snapshot(root(),
-            {u"KERJAMI.exe"_s, u"LauncherUpdater.exe"_s, u"extra.dll"_s, u"qt.conf"_s, u"obsolete.dll"_s,
-                u"resources"_s, u"temp"_s, u"updater"_s});
+            {u"KERJAMI.exe"_s, u"extra.dll"_s, u"qt.conf"_s, u"obsolete.dll"_s, u"resources"_s, u"temp"_s,
+                u"updater"_s});
     }
 
 private slots:
@@ -220,7 +217,7 @@ private slots:
         QVERIFY2(parsed.ok, qPrintable(parsed.error));
         QCOMPARE(parsed.manifest.version, u"2.0.0"_s);
         QCOMPARE(parsed.manifest.files.size(), 2);
-        QCOMPARE(parsed.manifest.find(u"launcherupdater.EXE"_s)->size, qint64(5)); // case does not matter
+        QCOMPARE(parsed.manifest.find(u"helper.DLL"_s)->size, qint64(5)); // case does not matter
         QCOMPARE(format::toJson(parsed.manifest),
             format::toJson(format::parse(format::toJson(parsed.manifest), kExpect).manifest));
 
@@ -242,6 +239,18 @@ private slots:
         QVERIFY2(parsed.ok, qPrintable(parsed.error));
         QCOMPARE(
             parsed.manifest.find(u"resources/styles/app.qss"_s)->sha256, sha256("x")); // stored lowercase
+    }
+
+    void manifest_ignoresKeysItDoesNotKnow()
+    {
+        // The launcher is the only program; an "updater" entry (from a draft of the format) means nothing.
+        QJsonObject object = validManifest();
+        object.insert(u"updater"_s, u"Evil.exe"_s);
+        object.insert(u"something_new"_s, 1);
+        const auto parsed = format::parse(toBytes(object), kExpect);
+        QVERIFY2(parsed.ok, qPrintable(parsed.error));
+        QCOMPARE(parsed.manifest.files.size(), 2);
+        QVERIFY(!format::toJson(parsed.manifest).contains("Evil.exe"));
     }
 
     void manifest_refusals_data()
@@ -279,7 +288,6 @@ private slots:
         QTest::newRow("version word") << with(u"version"_s, u"latest"_s) << u"not a version"_s;
         QTest::newRow("version with v") << with(u"version"_s, u"v2.0.0"_s) << u"not a version"_s;
         QTest::newRow("launcher renamed") << with(u"launcher"_s, u"Evil.exe"_s) << u"launcher"_s;
-        QTest::newRow("updater renamed") << with(u"updater"_s, u"Evil.exe"_s) << u"updater"_s;
         QTest::newRow("launcher traversal") << with(u"launcher"_s, u"../KERJAMI.exe"_s) << u"launcher"_s;
         QTest::newRow("files not a list") << with(u"files"_s, u"x"_s) << u"files"_s;
         QTest::newRow("files empty") << with(u"files"_s, QJsonArray {}) << u"files"_s;
@@ -399,12 +407,11 @@ private slots:
         // The obsolete file is gone, the replaced ones are in the backup, the unchanged one was not touched.
         QVERIFY(!QFileInfo::exists(root() + u"/obsolete.dll"_s));
         QCOMPARE(readFile(plan.backupDir + u"/KERJAMI.exe"_s), QByteArray("old launcher"));
-        QCOMPARE(readFile(plan.backupDir + u"/LauncherUpdater.exe"_s), QByteArray("old updater"));
         QCOMPARE(readFile(plan.backupDir + u"/extra.dll"_s), QByteArray("old extra"));
         QCOMPARE(readFile(plan.backupDir + u"/obsolete.dll"_s), QByteArray("obsolete"));
         QCOMPARE(readFile(plan.backupDir + u"/resources/theme.qss"_s), QByteArray("old theme"));
         QVERIFY(!QFileInfo::exists(plan.backupDir + u"/qt.conf"_s));
-        QCOMPARE(result.filesChanged, 6); // five replaced or added (qt.conf was already right), one removed
+        QCOMPARE(result.filesChanged, 5); // four replaced or added (qt.conf was already right), one removed
 
         // The user's data is byte for byte as before.
         QCOMPARE(dataNow(), dataBefore);
@@ -451,8 +458,8 @@ private slots:
         };
         QVERIFY(transaction::apply(plan).ok());
         QVERIFY(!order.isEmpty());
+        QVERIFY(order.size() >= 2); // the other files were in place before the launcher program
         QCOMPARE(order.last(), u"KERJAMI.exe"_s);
-        QCOMPARE(order.at(order.size() - 2), u"LauncherUpdater.exe"_s);
     }
 
     // === refused before anything changes =============================================
@@ -656,8 +663,7 @@ private slots:
     {
         // Whatever the moment of the crash: back to the old state, or complete.
         const Files programBefore = programNow();
-        const int changes =
-            5; // KERJAMI.exe, LauncherUpdater.exe, extra.dll, resources/theme.qss, resources/added/new.txt
+        const int changes = 4; // KERJAMI.exe, extra.dll, resources/theme.qss, resources/added/new.txt
         for (int crashAt = 1; crashAt <= changes; ++crashAt) {
             m_dir = std::make_unique<QTemporaryDir>();
             install(oldProgram());
@@ -679,7 +685,7 @@ private slots:
     {
         // Everything is in place; the process died before it deleted the journal.
         TransactionPlan plan = makePlan(newProgram(), {});
-        plan.simulateCrashAfter = [](int step) { return step == 5; };
+        plan.simulateCrashAfter = [](int step) { return step == 4; }; // the fourth and last file is placed
         QCOMPARE(transaction::apply(plan).outcome, TransactionOutcome::Interrupted);
         QCOMPARE(readFile(root() + u"/KERJAMI.exe"_s), QByteArray("NEW launcher"));
 

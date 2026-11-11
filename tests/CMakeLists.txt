@@ -37,9 +37,9 @@ launcher_add_test(UpdateTests Qt6::ZlibPrivate)
 add_dependencies(UpdateTests SleepyApp)
 launcher_add_test(UpdateTransactionTests)
 launcher_add_test(LauncherUpdateTests Qt6::ZlibPrivate)
-add_dependencies(LauncherUpdateTests launcher_updater SleepyApp)
+add_dependencies(LauncherUpdateTests launcher SleepyApp)
 launcher_add_test(UpdaterTests)
-add_dependencies(UpdaterTests launcher_updater SleepyApp)
+add_dependencies(UpdaterTests launcher SleepyApp)
 
 # The UI test runs without a visible window. Screenshots of every page are
 # written to the build directory for visual review.

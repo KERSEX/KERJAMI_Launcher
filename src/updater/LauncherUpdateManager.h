@@ -81,8 +81,9 @@ struct LauncherUpdateInfo {
 };
 
 /// The launcher's own update: look for a newer release, download and check it,
-/// and hand it to LauncherUpdater.exe, which replaces the program files after
-/// the launcher has closed.
+/// and hand it to a copy of the running launcher program, started in its update
+/// mode (LauncherUpdater), which replaces the program files after the launcher
+/// has closed.
 ///
 /// The launcher never replaces its own running file. Nothing happens without
 /// the user: a new version is announced, and only a confirmed update is
@@ -93,7 +94,7 @@ class LauncherUpdateManager : public QObject {
     Q_OBJECT
 
 public:
-    /// How the updater program is started: its path and the job file. True if it was started.
+    /// How the update run is started: the path of the program copy and the job file. True if it was started.
     using UpdaterStarter = std::function<bool(const QString& updaterProgram, const QString& jobFile)>;
 
     LauncherUpdateManager(GitHubClient& client, ReleaseManager& releases, DownloadManager& downloads,
@@ -103,11 +104,15 @@ public:
     /// True while something else must not be interrupted by a restart: a project is being installed.
     void setBusyCheck(std::function<bool()> busy) { m_isBusy = std::move(busy); }
 
-    /// Starts the updater program. The default starts it detached from the launcher.
+    /// Starts the update run. The default starts the copy detached from the launcher
+    /// with `--apply-update --job <file>`.
     void setUpdaterStarter(UpdaterStarter starter) { m_startUpdater = std::move(starter); }
 
     /// Only tests change these: the version of the running launcher, the name of
-    /// its program file, and the product the manifest must be for.
+    /// its program file, the product the manifest must be for, and the program
+    /// that is copied for the update run (by default the running one, which is
+    /// known to work; a test process is not a launcher).
+    void setUpdaterSource(const QString& program) { m_updaterSource = program; }
     void setCurrentVersion(const QString& version)
     {
         m_currentVersion = version;
@@ -183,6 +188,7 @@ private:
     UpdaterStarter m_startUpdater;
     QString m_currentVersion;
     QString m_runningFile;
+    QString m_updaterSource; ///< The program copied for the update run; empty: the running one.
     ManifestExpectations m_expectations;
     qint64 m_processId = 0;
 

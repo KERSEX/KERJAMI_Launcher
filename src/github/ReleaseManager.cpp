@@ -59,7 +59,8 @@ void ReleaseManager::fetchLatest(const Project& project)
     const bool valid = RegistryParser::isValidProjectId(project.id)
         && RegistryParser::isValidOwner(project.owner)
         && RegistryParser::isValidRepository(project.repository)
-        && RegistryParser::isValidAssetPattern(project.assetPattern);
+        && RegistryParser::isValidAssetPattern(project.assetPattern)
+        && (project.tagPrefix.isEmpty() || RegistryParser::isValidTagPrefix(project.tagPrefix));
     if (!valid) {
         qCWarning(lcReleases) << "Not fetching releases: the project data is not valid";
         QTimer::singleShot(0, this, [this, project] { fail(project, Problem::InvalidProject, 0); });
@@ -100,7 +101,7 @@ void ReleaseManager::onFetched(const Project& project, const NetworkResult& resu
         return;
     }
 
-    const ReleaseListResult list = ReleaseParser::parseList(result.body);
+    const ReleaseListResult list = ReleaseParser::parseList(result.body, project.tagPrefix);
     if (!list.ok) {
         qCWarning(lcReleases).noquote() << "Release answer is not usable:" << list.error;
         fail(project, Problem::InvalidContent, result.httpStatus);

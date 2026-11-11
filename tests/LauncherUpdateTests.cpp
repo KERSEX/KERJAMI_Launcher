@@ -1,7 +1,8 @@
 // The launcher's own update: finding a newer release, downloading and checking
-// it, the hostile packages it must refuse, and the hand-over to the updater.
-// A server on the local machine plays GitHub; the updater program is replaced
-// by a function that records what it was asked to start.
+// it, the hostile packages it must refuse, and the hand-over to the update run.
+// A server on the local machine plays GitHub; starting the update run is replaced
+// by a function that records what it was asked to start (except in the one test
+// that runs the whole chain with the real program).
 
 #include "SleepyProject.h"
 #include "TestHttpServer.h"
@@ -16,6 +17,7 @@
 #include "github/ReleaseManager.h"
 #include "security/HashVerifier.h"
 #include "updater/LauncherUpdateManager.h"
+#include "updater/LauncherUpdater.h"
 #include "updater/UpdateManifest.h"
 #include "updater/UpdateStartup.h"
 
@@ -59,6 +61,12 @@ QString sha256(const QByteArray& data)
     return QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
 }
 
+bool writeSmallFile(const QString& path, const QByteArray& content)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(content) == content.size();
+}
+
 /// What the server offers as the newest launcher release.
 struct Offer {
     QString version = u"2.0.0"_s;
@@ -78,29 +86,24 @@ class LauncherUpdateTests : public QObject {
 private:
     // --- the release and the server -----------------------------------------------------
 
-    /// The release ZIP: the program, the updater and the manifest that lists them.
+    /// The release ZIP: the program and the manifest that lists it.
     static QByteArray package(const QString& version, const std::function<void(UpdateManifest&)>& tweak = {},
         const QList<testzip::Entry>& extra = {}, bool withManifest = true,
-        const QByteArray& launcherProgram = {}, const QByteArray& updaterProgram = {})
+        const QByteArray& launcherProgram = {})
     {
         const QByteArray launcherExe =
             launcherProgram.isEmpty() ? "launcher program " + version.toUtf8() : launcherProgram;
-        const QByteArray updaterExe =
-            updaterProgram.isEmpty() ? "updater program " + version.toUtf8() : updaterProgram;
 
         UpdateManifest manifest;
         manifest.schemaVersion = 1;
         manifest.product = branding::productName();
         manifest.version = version;
         manifest.launcher = branding::executableFileName();
-        manifest.updater = branding::updaterFileName();
-        manifest.files = {{manifest.launcher, launcherExe.size(), sha256(launcherExe)},
-            {manifest.updater, updaterExe.size(), sha256(updaterExe)}};
+        manifest.files = {{manifest.launcher, launcherExe.size(), sha256(launcherExe)}};
         if (tweak)
             tweak(manifest);
 
-        QList<testzip::Entry> entries {testzip::file(branding::executableFileName(), launcherExe),
-            testzip::file(branding::updaterFileName(), updaterExe)};
+        QList<testzip::Entry> entries {testzip::file(branding::executableFileName(), launcherExe)};
         if (withManifest)
             entries.append(testzip::file(format::kFileName, format::toJson(manifest), false));
         entries += extra;
@@ -205,7 +208,7 @@ private:
 
     QString updaterCopy() const
     {
-        return m_paths->tempDir() + u"/updater-2.0.0/"_s + branding::updaterFileName();
+        return m_paths->tempDir() + u"/updater-2.0.0/"_s + branding::executableFileName();
     }
     QString stagingDir() const { return m_paths->tempDir() + u"/update-2.0.0"_s; }
 
@@ -256,6 +259,10 @@ private slots:
         m_manager->setCurrentVersion(u"1.0.0"_s);
         m_manager->setRunningFileName(branding::executableFileName());
         m_manager->setProcessId(4242);
+        // The update run is a copy of the running program; here a small stand-in, so that the
+        // tests do not copy 30 MB each (the end-to-end test uses the real program).
+        QVERIFY(writeSmallFile(m_dir->filePath(u"running-launcher.exe"_s), "the running launcher program"));
+        m_manager->setUpdaterSource(m_dir->filePath(u"running-launcher.exe"_s));
         m_manager->setBusyCheck([this] { return m_busy; });
         m_manager->setUpdaterStarter([this](const QString& program, const QString& jobFile) {
             m_starts.append({program, jobFile});
@@ -389,10 +396,10 @@ private slots:
         QVERIFY(seen.contains(LauncherUpdateState::Ready));
         QCOMPARE(seen.last(), LauncherUpdateState::Applying);
 
-        // The updater was started once: a copy in temp/, with the job next to it.
+        // The update run was started once: a copy of the running program in temp/, with the job next to it.
         QCOMPARE(m_starts.size(), 1);
         QCOMPARE(QDir::cleanPath(m_starts.first().first), QDir::cleanPath(updaterCopy()));
-        QCOMPARE(readFile(updaterCopy()), QByteArray("updater program 2.0.0")); // from the verified package
+        QCOMPARE(readFile(updaterCopy()), QByteArray("the running launcher program"));
         const auto job = launcher::JsonFile::load(m_starts.first().second);
         QCOMPARE(job.status, launcher::JsonFile::Status::Ok);
         const auto parsed = launcher::UpdaterJob::fromJson(job.object);
@@ -402,7 +409,6 @@ private slots:
         QCOMPARE(parsed->fromVersion, u"1.0.0"_s);
         QCOMPARE(parsed->toVersion, u"2.0.0"_s);
         QCOMPARE(parsed->launcherFile, branding::executableFileName());
-        QCOMPARE(parsed->updaterFile, branding::updaterFileName());
         QCOMPARE(parsed->product, branding::productName());
         QCOMPARE(parsed->launcherProcessId, qint64(4242));
 
@@ -656,16 +662,15 @@ private slots:
 
     void selfUpdateEndToEnd()
     {
-        // The manager prepares a real package and starts the real updater, which waits
-        // for the old launcher, replaces the files and starts the new launcher.
+        // The manager prepares a real package and starts the real program in update mode,
+        // which waits for the old launcher, replaces the files and starts the new launcher.
         const QString root = m_paths->root();
-        const QString updaterPath = QDir::cleanPath(
-            QCoreApplication::applicationDirPath() + u"/../bin/"_s + branding::updaterFileName());
-        QVERIFY2(QFileInfo::exists(updaterPath), qPrintable(updaterPath));
+        const QString programPath = QDir::cleanPath(
+            QCoreApplication::applicationDirPath() + u"/../bin/"_s + branding::executableFileName());
+        QVERIFY2(QFileInfo::exists(programPath), qPrintable(programPath));
         const QByteArray oldLauncher = readFile(sleepy::appPath());
         const QByteArray newLauncher = oldLauncher + "NEW-2.0.0";
-        const QByteArray realUpdater = readFile(updaterPath);
-        QVERIFY(!oldLauncher.isEmpty() && !realUpdater.isEmpty());
+        QVERIFY(!oldLauncher.isEmpty());
 
         const auto write = [](const QString& path, const QByteArray& content) {
             QDir().mkpath(QFileInfo(path).absolutePath());
@@ -673,7 +678,6 @@ private slots:
             return file.open(QIODevice::WriteOnly) && file.write(content) == content.size();
         };
         QVERIFY(write(root + u"/"_s + branding::executableFileName(), oldLauncher));
-        QVERIFY(write(root + u"/"_s + branding::updaterFileName(), "old updater"));
         QVERIFY(write(root + u"/library/tool/current/Tool.exe"_s, "a project"));
         QVERIFY(write(root + u"/downloads/other/keep.zip"_s, "a download"));
         const QByteArray settingsBefore = readFile(m_paths->settingsFile());
@@ -683,20 +687,22 @@ private slots:
         oldProcess.start(root + u"/"_s + branding::executableFileName(), {});
         QVERIFY(oldProcess.waitForStarted(10000));
         m_manager->setProcessId(oldProcess.processId());
+        m_manager->setUpdaterSource(programPath);
         m_manager->setUpdaterStarter([](const QString& program, const QString& jobFile) {
-            return QProcess::startDetached(
-                program, {u"--job"_s, jobFile, u"--quiet"_s}, QFileInfo(program).absolutePath());
+            return QProcess::startDetached(program,
+                {QString::fromLatin1(launcher::LauncherUpdater::modeFlag()), u"--job"_s, jobFile,
+                    u"--quiet"_s},
+                QFileInfo(program).absolutePath());
         });
 
-        offer(u"2.0.0"_s, package(u"2.0.0"_s, {}, {}, true, newLauncher, realUpdater));
+        offer(u"2.0.0"_s, package(u"2.0.0"_s, {}, {}, true, newLauncher));
         QVERIFY(checkAndWait());
         m_manager->install();
         QVERIFY(waitForState(LauncherUpdateState::Applying, 60000));
 
-        // The updater runs, but the old launcher is still there: nothing has changed.
+        // The update run is going, but the old launcher is still there: nothing has changed.
         QTest::qWait(1500);
         QCOMPARE(readFile(root + u"/"_s + branding::executableFileName()), oldLauncher);
-        QCOMPARE(readFile(root + u"/"_s + branding::updaterFileName()), QByteArray("old updater"));
         QVERIFY(!QFileInfo::exists(m_paths->updateReportFile()));
 
         // The launcher closes, as it does after restartRequested().
@@ -705,7 +711,6 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(m_paths->updateReportFile()), 60000);
 
         QCOMPARE(readFile(root + u"/"_s + branding::executableFileName()), newLauncher);
-        QCOMPARE(readFile(root + u"/"_s + branding::updaterFileName()), realUpdater); // replaced itself too
         QCOMPARE(readFile(m_paths->settingsFile()), settingsBefore);
         QCOMPARE(readFile(root + u"/library/tool/current/Tool.exe"_s), QByteArray("a project"));
         QCOMPARE(readFile(root + u"/downloads/other/keep.zip"_s), QByteArray("a download"));

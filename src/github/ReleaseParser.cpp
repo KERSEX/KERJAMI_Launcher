@@ -57,13 +57,15 @@ std::optional<ReleaseAsset> parseAsset(const QJsonValue& value)
     return asset;
 }
 
-std::optional<Release> parseRelease(const QJsonObject& object)
+std::optional<Release> parseRelease(const QJsonObject& object, const QString& tagPrefix)
 {
     if (object.value("draft"_L1).toBool(false) || object.value("prerelease"_L1).toBool(false))
         return std::nullopt;
 
     const QString tag = object.value("tag_name"_L1).toString();
-    const std::optional<SemVer> version = SemVer::parse(tag);
+    if (!tagPrefix.isEmpty() && !tag.startsWith(tagPrefix, Qt::CaseSensitive))
+        return std::nullopt;
+    const std::optional<SemVer> version = SemVer::parse(tag.mid(tagPrefix.size()));
     if (!version || version->isPreRelease())
         return std::nullopt;
 
@@ -93,7 +95,7 @@ bool isValidAssetFileName(const QString& name)
         && !RegistryParser::isReservedWindowsName(name);
 }
 
-ReleaseListResult parseList(const QByteArray& json)
+ReleaseListResult parseList(const QByteArray& json, const QString& tagPrefix)
 {
     ReleaseListResult result;
 
@@ -115,7 +117,7 @@ ReleaseListResult parseList(const QByteArray& json)
             break;
         std::optional<Release> release;
         if (entries.at(i).isObject())
-            release = parseRelease(entries.at(i).toObject());
+            release = parseRelease(entries.at(i).toObject(), tagPrefix);
         if (release)
             result.releases.append(*release);
         else

@@ -113,15 +113,9 @@ ManifestParseResult parse(const QByteArray& json, const ManifestExpectations& ex
     manifest.launcher = checkedPath(root.value(u"launcher"_s).toString(), &reason);
     if (manifest.launcher.isEmpty())
         return refuse(u"launcher: %1"_s.arg(reason));
-    manifest.updater = checkedPath(root.value(u"updater"_s).toString(), &reason);
-    if (manifest.updater.isEmpty())
-        return refuse(u"updater: %1"_s.arg(reason));
     if (manifest.launcher.compare(expectations.launcherFile, Qt::CaseInsensitive) != 0)
         return refuse(u"the launcher program is \"%1\", expected \"%2\""_s.arg(
             manifest.launcher, expectations.launcherFile));
-    if (manifest.updater.compare(expectations.updaterFile, Qt::CaseInsensitive) != 0)
-        return refuse(u"the updater program is \"%1\", expected \"%2\""_s.arg(
-            manifest.updater, expectations.updaterFile));
 
     const QJsonValue files = root.value(u"files"_s);
     if (!files.isArray() || files.toArray().isEmpty() || files.toArray().size() > kMaxFiles)
@@ -157,8 +151,6 @@ ManifestParseResult parse(const QByteArray& json, const ManifestExpectations& ex
 
     if (!manifest.find(manifest.launcher))
         return refuse(u"the launcher program \"%1\" is not in the file list"_s.arg(manifest.launcher));
-    if (!manifest.find(manifest.updater))
-        return refuse(u"the updater program \"%1\" is not in the file list"_s.arg(manifest.updater));
 
     const QJsonValue remove = root.value(u"remove"_s);
     if (!remove.isUndefined()) {
@@ -189,8 +181,7 @@ QByteArray toJson(const UpdateManifest& manifest)
             QJsonObject {{u"path"_s, file.path}, {u"size"_s, file.size}, {u"sha256"_s, file.sha256}});
     }
     QJsonObject root {{u"schema_version"_s, manifest.schemaVersion}, {u"product"_s, manifest.product},
-        {u"version"_s, manifest.version}, {u"launcher"_s, manifest.launcher},
-        {u"updater"_s, manifest.updater}, {u"files"_s, files}};
+        {u"version"_s, manifest.version}, {u"launcher"_s, manifest.launcher}, {u"files"_s, files}};
     if (!manifest.remove.isEmpty())
         root.insert(u"remove"_s, QJsonArray::fromStringList(manifest.remove));
     return QJsonDocument(root).toJson();

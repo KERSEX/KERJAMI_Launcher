@@ -1,13 +1,15 @@
-// LauncherUpdater.exe, the real program: it waits for the launcher to end,
-// replaces the program files from the staged release, starts the launcher
-// again, and leaves a report. "The launcher" is a copy of SleepyApp; the
-// program that is started again is told apart by the size of its file.
+// The update run, in the real program: KERJAMI_Launcher.exe started with --apply-update
+// waits for the launcher to end, replaces the program files from the staged
+// release, starts the launcher again, and leaves a report. "The launcher" in the
+// folder that is updated is a copy of SleepyApp; the program that is started
+// again is told apart by the size of its file.
 
 #include "SleepyProject.h"
 #include "app/Branding.h"
 #include "core/JsonFile.h"
 #include "core/PathManager.h"
 #include "security/HashVerifier.h"
+#include "updater/LauncherUpdater.h"
 #include "updater/UpdateManifest.h"
 #include "updater/UpdaterProtocol.h"
 
@@ -98,10 +100,13 @@ private:
     QString jobDir() const { return root() + u"/temp/updater-2.0.0"_s; }
     launcher::PathManager paths() const { return launcher::PathManager(root()); }
 
+    static QString updateFlag() { return QString::fromLatin1(launcher::LauncherUpdater::modeFlag()); }
+
+    /// The real launcher program, which also does the update run.
     static QString updaterExe()
     {
         return QDir::cleanPath(
-            QCoreApplication::applicationDirPath() + u"/../bin/"_s + branding::updaterFileName());
+            QCoreApplication::applicationDirPath() + u"/../bin/"_s + branding::executableFileName());
     }
 
     QStringList startedLog() const
@@ -122,21 +127,18 @@ private:
         QVERIFY(!m_oldLauncher.isEmpty());
 
         QVERIFY(writeFile(root() + u"/"_s + branding::executableFileName(), m_oldLauncher));
-        QVERIFY(writeFile(root() + u"/"_s + branding::updaterFileName(), "old updater"));
         QVERIFY(writeFile(root() + u"/extra.dll"_s, "old extra"));
         QVERIFY(writeFile(root() + u"/launcher/settings.json"_s, "{\"a\":1}"));
         QVERIFY(writeFile(root() + u"/library/tool/current/Tool.exe"_s, "project"));
         QVERIFY(writeFile(root() + u"/downloads/tool/Tool.zip"_s, "download"));
         QVERIFY(writeFile(root() + u"/logs/launcher.log"_s, "log"));
 
-        Files fresh {{branding::executableFileName(), m_newLauncher},
-            {branding::updaterFileName(), "NEW updater"}, {u"extra.dll"_s, "NEW extra"}};
+        Files fresh {{branding::executableFileName(), m_newLauncher}, {u"extra.dll"_s, "NEW extra"}};
         UpdateManifest manifest;
         manifest.schemaVersion = 1;
         manifest.product = branding::productName();
         manifest.version = u"2.0.0"_s;
         manifest.launcher = branding::executableFileName();
-        manifest.updater = branding::updaterFileName();
         for (const auto& [path, content] : fresh) {
             QVERIFY(writeFile(staging() + u'/' + path, content));
             manifest.files.append({path, content.size(), sha256(content)});
@@ -150,9 +152,9 @@ private:
     Files userData() const
     {
         Files files = snapshot(root(),
-            {branding::executableFileName(), branding::updaterFileName(), u"extra.dll"_s, u"temp"_s,
-                u"updater"_s, u"started.log"_s, u"stop"_s});
-        files.erase(u"logs/updater.log"_s); // the updater's own log: it writes it, nobody else's data
+            {branding::executableFileName(), u"extra.dll"_s, u"temp"_s, u"updater"_s, u"started.log"_s,
+                u"stop"_s});
+        files.erase(u"logs/updater.log"_s); // the update run's own log: it writes it, nobody else's data
         return files;
     }
 
@@ -164,23 +166,22 @@ private:
         job.fromVersion = u"1.0.0"_s;
         job.toVersion = u"2.0.0"_s;
         job.launcherFile = branding::executableFileName();
-        job.updaterFile = branding::updaterFileName();
         job.product = branding::productName();
         job.launcherProcessId = pid;
         job.waitTimeoutMs = 20000;
         return job;
     }
 
-    /// Starts the updater the way the launcher does: its own copy, in temp/, with a job file.
+    /// Starts the update run the way the launcher does: a copy of the program, in temp/, in update mode.
     void startUpdater(QProcess& process, const UpdaterJob& job)
     {
         QVERIFY(QDir().mkpath(jobDir()));
-        const QString copy = jobDir() + u'/' + branding::updaterFileName();
+        const QString copy = jobDir() + u'/' + branding::executableFileName();
         QFile::remove(copy);
         QVERIFY(QFile::copy(updaterExe(), copy));
         const QString jobFile = jobDir() + u"/job.json"_s;
         QVERIFY(launcher::JsonFile::saveAtomic(jobFile, job.toJson()));
-        process.start(copy, {u"--job"_s, jobFile, u"--quiet"_s});
+        process.start(copy, {updateFlag(), u"--job"_s, jobFile, u"--quiet"_s});
         QVERIFY(process.waitForStarted(10000));
     }
 
@@ -261,8 +262,8 @@ private slots:
         QCOMPARE(updater.exitCode(), 0);
 
         QCOMPARE(readFile(root() + u"/"_s + branding::executableFileName()), m_newLauncher);
-        QCOMPARE(readFile(root() + u"/"_s + branding::updaterFileName()),
-            QByteArray("NEW updater")); // the updater replaced itself too
+        // The update run was a copy in temp/, not the file that was replaced.
+        QVERIFY(QFileInfo::exists(jobDir() + u'/' + branding::executableFileName()));
         QCOMPARE(readFile(root() + u"/extra.dll"_s), QByteArray("NEW extra"));
         QCOMPARE(userData(), dataBefore); // the user's data, byte for byte
 
@@ -330,7 +331,6 @@ private slots:
 
         // The old version, completely.
         QCOMPARE(readFile(root() + u"/"_s + branding::executableFileName()), m_oldLauncher);
-        QCOMPARE(readFile(root() + u"/"_s + branding::updaterFileName()), QByteArray("old updater"));
         QCOMPARE(readFile(root() + u"/extra.dll"_s), QByteArray("old extra"));
         QCOMPARE(userData(), dataBefore);
         QVERIFY(!QFileInfo::exists(paths().updateJournalFile()));
@@ -449,18 +449,19 @@ private slots:
     void withoutAJobItDoesNothing()
     {
         QProcess process;
-        process.start(updaterExe(), {u"--quiet"_s});
+        process.start(updaterExe(), {updateFlag(), u"--quiet"_s});
         QVERIFY(process.waitForFinished(20000));
         QCOMPARE(process.exitCode(), 4);
 
         QProcess garbage;
         QVERIFY(writeFile(m_dir->filePath(u"job.json"_s), "{ not json"));
-        garbage.start(updaterExe(), {u"--job"_s, m_dir->filePath(u"job.json"_s), u"--quiet"_s});
+        garbage.start(updaterExe(), {updateFlag(), u"--job"_s, m_dir->filePath(u"job.json"_s), u"--quiet"_s});
         QVERIFY(garbage.waitForFinished(20000));
         QCOMPARE(garbage.exitCode(), 4);
 
         QProcess missing;
-        missing.start(updaterExe(), {u"--job"_s, m_dir->filePath(u"no-such-job.json"_s), u"--quiet"_s});
+        missing.start(
+            updaterExe(), {updateFlag(), u"--job"_s, m_dir->filePath(u"no-such-job.json"_s), u"--quiet"_s});
         QVERIFY(missing.waitForFinished(20000));
         QCOMPARE(missing.exitCode(), 4);
     }

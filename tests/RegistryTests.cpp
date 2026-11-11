@@ -104,6 +104,8 @@ private slots:
     void installDirectories();
     void assetPatterns_data();
     void assetPatterns();
+    void tagPrefixes_data();
+    void tagPrefixes();
     void executablePaths_data();
     void executablePaths();
 };
@@ -118,6 +120,7 @@ void RegistryTests::parsesAFullEntry()
     full.insert(u"featured"_s, true);
     full.insert(u"release_channel"_s, u"stable"_s);
     full.insert(u"asset_pattern"_s, u"KERS_Overlay-Windows-x64.zip"_s);
+    full.insert(u"tag_prefix"_s, u"KERS_SubsystemsV"_s);
     full.insert(u"executable"_s, u"bin/KERS_Overlay.exe"_s);
 
     const RegistryParseResult result = RP::parse(document({full}));
@@ -139,6 +142,7 @@ void RegistryTests::parsesAFullEntry()
     QVERIFY(project.featured);
     QCOMPARE(project.releaseChannel, launcher::ReleaseChannel::Stable);
     QCOMPARE(project.assetPattern, u"KERS_Overlay-Windows-x64.zip"_s);
+    QCOMPARE(project.tagPrefix, u"KERS_SubsystemsV"_s);
     QCOMPARE(project.executable, u"bin/KERS_Overlay.exe"_s);
     QCOMPARE(project.installDirectory, u"KERS_Overlay"_s);
 }
@@ -151,6 +155,7 @@ void RegistryTests::optionalFieldsHaveDefaults()
     QVERIFY(result.projects.first().tags.isEmpty());
     QVERIFY(!result.projects.first().featured);
     QCOMPARE(result.projects.first().releaseChannel, launcher::ReleaseChannel::Stable);
+    QVERIFY(result.projects.first().tagPrefix.isEmpty()); // the tag is the version
 }
 
 void RegistryTests::unknownFieldsAreIgnored()
@@ -359,6 +364,16 @@ void RegistryTests::invalidEntryIsDroppedAndOthersSurvive_data()
     row("asset pattern with question mark", u"asset_pattern"_s, quoted(u"app?.zip"_s));
     row("asset pattern with colon", u"asset_pattern"_s, quoted(u"c:app.zip"_s));
     row("asset pattern empty", u"asset_pattern"_s, u"\"\""_s);
+
+    row("tag prefix empty", u"tag_prefix"_s, u"\"\""_s);
+    row("tag prefix starts with a digit", u"tag_prefix"_s, quoted(u"1app-v"_s));
+    row("tag prefix starts with a hyphen", u"tag_prefix"_s, quoted(u"-v"_s));
+    row("tag prefix with slash", u"tag_prefix"_s, quoted(u"release/v"_s));
+    row("tag prefix with space", u"tag_prefix"_s, quoted(u"My App v"_s));
+    row("tag prefix with backslash", u"tag_prefix"_s, uR"("a\\b")"_s);
+    row("tag prefix too long", u"tag_prefix"_s, quoted(QString(33, u'p')));
+    row("tag prefix is a number", u"tag_prefix"_s, u"5"_s);
+    row("tag prefix is null", u"tag_prefix"_s, u"null"_s);
 
     row("executable missing", u"executable"_s, {});
     row("executable absolute", u"executable"_s, quoted(u"/app.exe"_s));
@@ -623,6 +638,37 @@ void RegistryTests::assetPatterns()
     QFETCH(QString, value);
     QFETCH(bool, valid);
     QCOMPARE(RP::isValidAssetPattern(value), valid);
+}
+
+void RegistryTests::tagPrefixes_data()
+{
+    QTest::addColumn<QString>("value");
+    QTest::addColumn<bool>("valid");
+
+    QTest::newRow("name and V") << u"TankstellenmealV"_s << true;
+    QTest::newRow("with underscore") << u"KERS_SubsystemsV"_s << true;
+    QTest::newRow("with hyphen") << u"app-v"_s << true;
+    QTest::newRow("with dot") << u"release.v"_s << true;
+    QTest::newRow("a single letter") << u"v"_s << true;
+    QTest::newRow("32 characters") << QString(32, u'p') << true;
+    QTest::newRow("33 characters") << QString(33, u'p') << false;
+    QTest::newRow("starts with a digit") << u"1v"_s << false;
+    QTest::newRow("starts with a dot") << u".v"_s << false;
+    QTest::newRow("starts with an underscore") << u"_v"_s << false;
+    QTest::newRow("slash") << u"a/v"_s << false;
+    QTest::newRow("backslash") << u"a\\v"_s << false;
+    QTest::newRow("space") << u"a v"_s << false;
+    QTest::newRow("question mark") << u"a?v"_s << false;
+    QTest::newRow("percent") << u"a%2Fv"_s << false;
+    QTest::newRow("trailing newline") << u"app-v\n"_s << false;
+    QTest::newRow("empty") << QString() << false;
+}
+
+void RegistryTests::tagPrefixes()
+{
+    QFETCH(QString, value);
+    QFETCH(bool, valid);
+    QCOMPARE(RP::isValidTagPrefix(value), valid);
 }
 
 void RegistryTests::executablePaths_data()

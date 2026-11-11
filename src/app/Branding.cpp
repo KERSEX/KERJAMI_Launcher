@@ -24,11 +24,6 @@ QString executableFileName()
     return QStringLiteral(LAUNCHER_BRAND_EXECUTABLE_NAME ".exe");
 }
 
-QString updaterFileName()
-{
-    return QStringLiteral(LAUNCHER_BRAND_UPDATER_NAME ".exe");
-}
-
 QString gitHubOwner()
 {
     return QStringLiteral(LAUNCHER_BRAND_GITHUB_OWNER);

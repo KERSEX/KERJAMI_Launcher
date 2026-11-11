@@ -1,4 +1,4 @@
-#include "LauncherUpdater.h"
+#include "updater/LauncherUpdater.h"
 
 #include "core/JsonFile.h"
 #include "core/Logger.h"
@@ -7,6 +7,7 @@
 #include "updater/UpdateManifest.h"
 #include "updater/UpdateTransaction.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -22,6 +23,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 using namespace Qt::StringLiterals;
@@ -117,6 +119,39 @@ LauncherUpdater::Result finish(int exitCode, UpdateReport report, const PathMana
 
 } // namespace
 
+const char* LauncherUpdater::modeFlag()
+{
+    return "--apply-update";
+}
+
+bool LauncherUpdater::isRequested(int argc, char* argv[])
+{
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], modeFlag()) == 0)
+            return true;
+    }
+    return false;
+}
+
+int LauncherUpdater::runProgram(int argc, char* argv[])
+{
+    QCoreApplication application(argc, argv);
+
+    const QStringList arguments = application.arguments();
+    const qsizetype flag = arguments.indexOf(u"--job"_s);
+    if (flag < 0 || flag + 1 >= arguments.size())
+        return ExitBadJob;
+
+    const JsonFile::LoadResult file = JsonFile::load(arguments.at(flag + 1));
+    if (file.status != JsonFile::Status::Ok)
+        return ExitBadJob;
+    const std::optional<UpdaterJob> job = UpdaterJob::fromJson(file.object);
+    if (!job)
+        return ExitBadJob;
+
+    return run(*job, !arguments.contains(u"--quiet"_s)).exitCode;
+}
+
 LauncherUpdater::Result LauncherUpdater::run(const UpdaterJob& job, bool showMessages)
 {
     const QString root = QDir::cleanPath(job.rootDir);
@@ -175,7 +210,7 @@ LauncherUpdater::Result LauncherUpdater::run(const UpdaterJob& job, bool showMes
     if (manifestFile.open(QIODevice::ReadOnly)) {
         const QByteArray text = manifestFile.read(4 * 1024 * 1024);
         manifestFile.close(); // an open file would keep the staging folder from being deleted
-        manifest = UpdateManifestFormat::parse(text, {job.product, job.launcherFile, job.updaterFile});
+        manifest = UpdateManifestFormat::parse(text, {job.product, job.launcherFile});
     } else {
         manifest.error = u"the manifest is missing"_s;
     }

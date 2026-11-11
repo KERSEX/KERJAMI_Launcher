@@ -14,8 +14,8 @@ Antwort des Teams, bevor die genannte Phase beginnt.
   Hakenzahn bauen und ob ihre Umgebung mit diesem Setup funktioniert, wird noch geklärt.
   Zur Qt-Lizenz (siehe E-06) weiß das Team es noch nicht (2026-11-10). Bis dahin wird statisch
   weitergebaut.
-- **Für llvm-mingw statisch:** Das Paket besteht aus zwei EXE-Dateien ohne DLLs und
-  Plugin-Ordner. `KERJAMI.exe` importiert nur Windows-Systembibliotheken. Das Selbstupdate
+- **Für llvm-mingw statisch:** Das Paket besteht aus einer EXE-Datei ohne DLLs und
+  Plugin-Ordner. `KERJAMI_Launcher.exe` importiert nur Windows-Systembibliotheken. Das Selbstupdate
   muss wenige Dateien tauschen. Keine Visual-C++-Laufzeit nötig.
 - **Für MSVC:** entspricht dem Auftrag, Debugging in Visual Studio, vorgefertigte Qt-Binaries
   in GitHub Actions. Dafür rund 40 DLLs und Plugins im Paket, `windeployqt` und `qt.conf`.
@@ -82,6 +82,35 @@ Antwort des Teams, bevor die genannte Phase beginnt.
   Parser bleibt gleich, jede Änderung der Registry ist dann ein neues Release.
 - **Betrifft:** Phase 2 (Registry-Adresse), Phase 6, Phase 8.
 
+### E-07 Die echten Projekte des Teams und ihre Releases
+
+- **Stand (2026-11-11).** Gelesen wurden nur die Release-Listen über die GitHub-API, nichts wurde geladen.
+
+  | Repository | Releases | Dateien im Release |
+  |---|---|---|
+  | `Amil300/Tankstellenmeal` (Spiel, UE 5.8) | 4 | je ein ZIP mit SHA-256-Digest, z. B. `Tankstellenmeal_0.12.3.zip`, rund 395 MB |
+  | `KERSEX/KERS_Overlay` | mindestens 5 | je eine einzelne `KERS_Subsystems.exe` mit Digest (56 MB, früher 232 MB) |
+  | `KERSEX/KERIA-AI_HUB`, `KERSEX/KERS_Mods`, `KERSEX/SellAndRun`, `KERSEX/Karriereleiter` | keines | – |
+  | `KERSEX/KERJAMI_Launcher` | keines | – |
+
+- **Was der Launcher heute daraus macht:**
+  - **Tags:** Eine Version ist `1.2.3` oder `v1.2.3` (D-21). `TankstellenmealV0.12.3` und
+    `KERS_SubsystemsV0.3.1` gelten deshalb nicht als Version: Beide Projekte würden als „ohne Release“
+    erscheinen. Bei Tankstellenmeal sind außerdem `TankstellenmealV0.12` (nur zwei Zahlen) und
+    `TankstellenmealV012.2` (führende Null, gehört zur Datei 0.12.1) auch ohne Präfix keine gültige Version.
+  - **Dateiform:** Tankstellenmeal passt (ZIP, Digest, 395 MB liegen unter dem Limit von 2 GiB je Datei). KERS
+    Overlay passt nicht, weil es eine einzelne EXE ist (D-14). Ohne Release lässt sich nichts installieren.
+- **Tags: gelöst** durch das optionale Registry-Feld `tag_prefix` (D-42). Mit `"tag_prefix":
+  "TankstellenmealV"` und `"KERS_SubsystemsV"` erkennt der Launcher die Releases der beiden Projekte. Bei
+  Tankstellenmeal bleiben `TankstellenmealV0.12` und `TankstellenmealV012.2` auch damit ungültig; die neueste
+  Version `0.12.3` wird gefunden.
+- **Vorschlag zu Einzel-EXE-Releases:** KERS Overlay veröffentlicht künftig ein ZIP (eine EXE im ZIP genügt). Oder
+  eine spätere Version des Launchers bekommt einen Asset-Typ „exe“ (Prüfsumme ja, Archivprüfung entfällt).
+- **Fehlt noch für einen echten Test von Tankstellenmeal:** der Pfad der Startdatei im ZIP (`executable`). Ihn
+  kennt Amil oder das ZIP selbst; es wurde nicht geladen. Für die anderen vier Projekte braucht es zuerst ein
+  Release mit ZIP.
+- **Betrifft:** Inhalt der Registry (E-03), echte Tests (E-02), Phase 7 (Projektseiten).
+
 ## Getroffen
 
 ### D-01 Produktname nur in `cmake/Branding.cmake`
@@ -93,15 +122,15 @@ eine Datei und kompiliert eine Übersetzungseinheit neu.
 
 ### D-02 Drei Build-Ziele statt eines
 
-`launcher_core` (ohne UI), `launcher_ui` (Widgets) und die EXE. So linkt der Updater später nur
-den Kern, und Tests prüfen Logik ohne Fenster. Die Schichtentrennung aus dem Auftrag wird damit
+`launcher_core` (ohne UI), `launcher_ui` (Widgets) und die EXE. So bleibt der Kern frei von Widgets,
+und Tests prüfen Logik ohne Fenster. Die Schichtentrennung aus dem Auftrag wird damit
 vom Build-System erzwungen: `launcher_core` kann Widgets gar nicht einbinden.
 
 Seit Phase 6 gibt es darunter noch `launcher_base` (nur Qt Core): Pfade, Logger, JSON, SemVer, Hash, Archivregeln,
 Registry-Parser sowie Manifest, Transaktion und Auftrag des Updaters. `launcher_core` baut darauf auf
-und fügt Netzwerk, Manager und Dienste hinzu. `LauncherUpdater.exe` linkt nur `launcher_base`: Es gibt
-kein Netzwerk im Programm, das Dateien austauscht, und die EXE bleibt mit etwa 9 MB deutlich kleiner als
-der Launcher (etwa 30 MB).
+und fügt Netzwerk, Manager und Dienste hinzu. Der Austausch der Programmdateien beim Selbstupdate
+(`LauncherUpdater`, eine Betriebsart von `KERJAMI_Launcher.exe`, D-40) liegt in `launcher_base`: Er braucht weder
+Netzwerk noch Fenster.
 
 ### D-03 Kein `QSettings`, kein `QStandardPaths`
 
@@ -128,7 +157,7 @@ meldet das und beendet sich. Eine übrig gebliebene Sperrdatei blockiert nicht:
 
 Beim ersten Testlauf schrieb eine zweite Instanz in dieselbe `launcher.log`, und die erste
 überschrieb deren Eintrag. Der Logger wird deshalb erst installiert, wenn die Instanz-Sperre
-gehalten wird. Der Updater bekommt eine eigene Datei (`updater.log`).
+gehalten wird. Der Austausch beim Selbstupdate (D-40) bekommt eine eigene Datei (`updater.log`).
 
 ### D-07 Log-Rotation und Datenschutz
 
@@ -319,7 +348,8 @@ Abfrage aus. Läuft schon eine Abfrage, werden weitere ignoriert.
 ### D-21 Versionen und Tags
 
 - Versionen folgen Semantic Versioning 2.0.0 streng, mit einem optionalen `v` oder `V` davor (so
-  heißen Git-Tags). Andere Präfixe wie `KERS_SubsystemsV0.3.1` gelten nicht als Version (siehe D-14).
+  heißen Git-Tags). Andere Präfixe wie `KERS_SubsystemsV0.3.1` gelten nur, wenn der Registry-Eintrag sie als
+  `tag_prefix` nennt (D-42).
 - Führende Nullen (`01.2.3`), Zahlen mit mehr als neun Stellen, Leerzeichen und Zeilenumbrüche
   machen eine Version ungültig.
 - Reihenfolge nach der Spezifikation: erst Haupt-, Neben- und Patch-Zahl als Zahlen
@@ -689,11 +719,13 @@ als einfacher Weg für Tests und Werkzeuge.
   (`BRAND_UPDATE_ASSET_PATTERN`) und kommt über `branding::updateAssetPattern()` in den Code. Gewählt
   wird wie bei Projekten (D-23): genau eine passende Datei.
 - **Inhalt:** Die Programmdateien liegen an der Wurzel des ZIPs, dazu `update-manifest.json`. Das Manifest
-  (Schema 1) nennt `product`, `version`, `launcher`, `updater`, `files` (`path`, `size`, `sha256`) und
+  (Schema 1) nennt `product`, `version`, `launcher`, `files` (`path`, `size`, `sha256`) und
   `remove` (Dateien früherer Versionen, die nicht mehr dazugehören). Nur Dateien aus `files` werden je
   geschrieben, nur Dateien aus `remove` je gelöscht. Was sonst im ZIP liegt, wird nicht installiert.
+  Das Programm ist **eine einzige Datei**: das ZIP enthält `KERJAMI_Launcher.exe` und das Manifest. Unbekannte
+  Schlüssel (auch ein `updater` aus einem frühen Entwurf) werden ignoriert.
 - **Das Manifest ist unbeglaubigte Eingabe.** Der Parser verlangt: gleiches Produkt, die Version des
-  Releases, die Programmdateien von Launcher und Updater in der Liste, 1 bis 200 Dateien, höchstens 200
+  Releases, die Programmdatei des Launchers in der Liste, 1 bis 200 Dateien, höchstens 200
   Einträge in `remove`, jede Datei höchstens 2 GiB, Pfade nach den Windows-Regeln der Archivprüfung
   (D-29) und keine doppelten Pfade, auch nicht, wenn sich nur die Groß-/Kleinschreibung unterscheidet.
   **Gesperrt** sind die Ordner mit Nutzerdaten (`launcher`, `library`, `downloads`, `temp`, `cache`,
@@ -713,18 +745,23 @@ als einfacher Weg für Tests und Werkzeuge.
   kommen kann, lehnt der Registry-Parser sie ab (`RegistryParser::isReservedProjectId`).
 - **Version:** Ein Update ist ein echt größerer SemVer-Wert als `branding::version()`. Vorabversionen
   werden wie bei Projekten ignoriert (D-21), ein Downgrade gibt es nicht.
-- **Grund für ein Manifest statt „alles im ZIP ersetzen“:** Der Updater darf nie raten, was zum Programm
+- **Grund für ein Manifest statt „alles im ZIP ersetzen“:** Der Austausch darf nie raten, was zum Programm
   gehört. Die Liste mit Hashes macht den Austausch prüfbar (vorher und nachher) und schützt Nutzerdaten
   auch dann, wenn ein Release-ZIP einmal falsch gepackt wird.
 
-### D-40 Der Updater (`LauncherUpdater.exe`) und die Transaktion
+### D-40 Der Austausch der Programmdateien (`--apply-update`) und die Transaktion
 
-- **Eigenes Programm, gestartet als Kopie.** Der Launcher kopiert die `LauncherUpdater.exe` des *neuen*
-  Releases nach `temp/updater-<Version>/`, schreibt dort `job.json` und startet die Kopie getrennt
-  (`--job job.json`). So kann der Updater auch die eigene Datei und die EXE des Launchers ersetzen, und
-  es gilt immer der Austausch-Code der neuen Version. Der Updater gehört zu `launcher_base` (nur Qt Core):
-  kein Netzwerk, keine Fenster (D-02).
-- **Reihenfolge im Updater:** Sperre `updater/updater.lock` → Log `logs/updater.log` → der Auftrag muss
+- **Kein zweites Programm.** Der Launcher ist die einzige EXE (Wunsch des Teams: eine Datei). Für den
+  Austausch kopiert er sich selbst, die laufende `KERJAMI_Launcher.exe`, nach `temp/updater-<Version>/`, schreibt
+  dort `job.json` und startet die Kopie getrennt mit `--apply-update --job job.json`. `main()` erkennt das
+  Flag, bevor ein Fenster oder die Einzelinstanz-Sperre entsteht, und führt nur den Austausch aus
+  (`LauncherUpdater::runProgram`: ein `QCoreApplication`, kein Fenster, kein Netzwerk). Eine laufende Datei
+  lässt sich nicht ersetzen; die Kopie liegt woanders und kann es. Es ist die Kopie des *laufenden*
+  Launchers, nicht die des neuen Releases: Dieser Code ist nachweislich lauffähig, auch wenn das neue
+  Release defekt wäre. Der Code liegt in `launcher_base` (nur Qt Core, D-02). Eine frühere Fassung hatte
+  eine eigene `LauncherUpdater.exe`; Windows Defender hat sie fälschlich als Schadsoftware gemeldet
+  (Bekannte Grenzen), und das Team wollte ohnehin nur eine Datei.
+- **Reihenfolge im Austausch:** Sperre `updater/updater.lock` → Log `logs/updater.log` → der Auftrag muss
   stimmen (Ordner vorhanden, Staging im Programmordner) → **warten, bis der Launcher beendet ist**
   (Handle auf die PID; läuft unter dieser PID ein anderes Programm als der Launcher, wird nicht gewartet,
   weil die PID wiederverwendet wurde; höchstens 60 Sekunden, einstellbar bis 10 Minuten; danach 300 ms
@@ -735,11 +772,10 @@ als einfacher Weg für Tests und Werkzeuge.
   gegen ihren Hash, jeder Zielpfad gegen die Pfadregeln, keine Links. (2) Das Journal
   `updater/journal.json` schreiben. (3) Jede zu ersetzende Datei nach `updater/backups/<alte Version>-<Zeit>/`
   verschieben und die neue an ihren Platz verschieben; Dateien mit gleichem Hash bleiben unangetastet,
-  Dateien aus `remove` wandern ebenfalls ins Backup. **Die Programmdatei des Updaters kommt vor der des
-  Launchers, die des Launchers zuletzt:** Solange sie die alte ist, lässt sich die alte Version noch
-  starten. (4) Alle platzierten Dateien noch einmal gegen die Hashes prüfen. (5) Das Journal löschen.
+  Dateien aus `remove` wandern ebenfalls ins Backup. **Die Programmdatei des Launchers kommt zuletzt:**
+  Solange sie die alte ist, lässt sich die alte Version noch starten. (4) Alle platzierten Dateien noch einmal gegen die Hashes prüfen. (5) Das Journal löschen.
 - **Fehler:** Scheitert ein Schritt, wird der alte Zustand wiederhergestellt (`RolledBack`, Exitcode 1).
-  Gelingt das nicht vollständig (`RollbackFailed`, Exitcode 3), startet der Updater den Launcher nicht
+  Gelingt das nicht vollständig (`RollbackFailed`, Exitcode 3), startet der Austausch den Launcher nicht
   und nennt den Backup-Ordner. Der Launcher beendet die Wiederherstellung beim nächsten Start selbst.
 - **Absturz mittendrin:** Das Journal bleibt liegen. `UpdateTransaction::recover` entscheidet beim nächsten
   Start des Launchers anhand der Dateien selbst: sind alle neu, gilt das Update als abgeschlossen, sonst
@@ -748,14 +784,14 @@ als einfacher Weg für Tests und Werkzeuge.
   Detail, Backup-Ordner, ob der Launcher gestartet wurde). Der Launcher zeigt ihn beim nächsten Start einmal
   und löscht ihn.
 - **Exitcodes:** 0 Erfolg, 1 zurückgerollt, 2 nichts geändert, 3 fehlgeschlagen, 4 ungültiger Auftrag.
-  `--quiet` unterdrückt die Meldungsfenster (für Tests); ohne `--quiet` zeigt der Updater bei Problemen
+  `--quiet` unterdrückt die Meldungsfenster (für Tests); ohne `--quiet` zeigt der Austausch bei Problemen
   ein Windows-Meldungsfenster.
-- **Beim Start des Launchers** (`UpdateStartup::run`, vor allem anderen): Läuft noch ein Updater (Sperre),
+- **Beim Start des Launchers** (`UpdateStartup::run`, vor allem anderen): Läuft noch ein Austausch (Sperre),
   wartet der Launcher bis zu 60 Sekunden; ist er dann nicht fertig, meldet er es und beendet sich, statt
   ein zweites Programm in einen halb ausgetauschten Ordner zu starten. Dann `recover`, dann der Bericht.
   `LibraryLayout::cleanupTemp` löscht übrig gebliebene `update-*` und `updater-*` aus `temp/`.
-- **Aufräumen:** Nach Erfolg löscht der Updater den Staging-Ordner, er behält die zwei neuesten Backups in
-  `updater/backups/`. Die eigene Kopie in `temp/updater-<Version>/` löscht der Launcher beim nächsten Start.
+- **Aufräumen:** Nach Erfolg löscht der Austausch den Staging-Ordner, er behält die zwei neuesten Backups in
+  `updater/backups/`. Die laufende Kopie in `temp/updater-<Version>/` löscht der Launcher beim nächsten Start.
 
 ### D-41 Ablauf und Oberfläche des Launcher-Updates (`LauncherUpdateManager`)
 
@@ -767,28 +803,49 @@ als einfacher Weg für Tests und Werkzeuge.
   mit Version und Changelog; sie sagt, dass der Launcher schließt und neu startet, dass laufende Projekte
   geöffnet bleiben und dass Einstellungen, Projekte und Downloads unverändert bleiben. Mit „Aktualisieren“
   stimmt der Nutzer dem ganzen Ablauf zu: laden, prüfen (D-39), neu starten. Ist das Paket bereit und läuft
-  keine Installation, übergibt der Launcher von selbst an den Updater. Eine zweite Rückfrage gäbe es
+  keine Installation, übergibt der Launcher von selbst an den Austausch. Eine zweite Rückfrage gäbe es
   nur, damit der Nutzer ein Fenster mehr wegklickt. Es gibt keinen Modus „automatisch“ für den Launcher.
 - **Zustände:** Idle, Prüfung, Aktuell, Verfügbar, Lädt, Prüft („Preparing“), Bereit, Wird angewendet,
   Fehlgeschlagen. Fehlerarten: Release nicht abrufbar, keine Prüfsumme, Prüfsummendatei, Download, Paket,
-  Installationen laufen noch („Busy“), Übergabe an den Updater. Nach einem Fehler gilt „Erneut versuchen“
+  Installationen laufen noch („Busy“), Übergabe an den Austausch. Nach einem Fehler gilt „Erneut versuchen“
   für dieselbe Version ohne neue Rückfrage; eine neuere Version beginnt von vorn.
 - **Busy:** Laufende Installationen oder Updates von Projekten (`InstallService::busyCount() > 0`) halten den
   Neustart auf, denn er würde sie beenden. Der Zustand „Bereit“ bleibt dann stehen, der Hinweis erklärt den
   Grund, und „Jetzt neu starten“ geht, sobald die Installationen fertig sind. Laufende *Projekte* stören
   nicht: Der Austausch fasst nur Dateien des Launchers an.
 - **Abbrechen** geht beim Laden, beim Prüfen und im Zustand „Bereit“; der Staging-Ordner wird entfernt. Ab der
-  Übergabe an den Updater ist es zu spät.
-- **Übergabe:** `apply()` schreibt den Auftrag und startet die Kopie des Updaters. Gelingt das nicht, bleibt
+  Übergabe ist es zu spät.
+- **Übergabe:** `apply()` kopiert den laufenden Launcher nach `temp/updater-<Version>/`, schreibt den Auftrag
+  und startet die Kopie im Austausch-Modus. Gelingt das nicht, bleibt
   der Launcher offen und zeigt den Fehler (Fehlerart „Übergabe“, Staging wird entfernt). Gelingt es, meldet er
   `restartRequested`, und die Anwendung beendet sich.
-- **Der Launcher aktualisiert sich nur unter seinem Programmnamen** (`KERJAMI.exe`). Läuft er unter einem
-  anderen Dateinamen (umbenannt, aus einem Testordner), lehnt `apply()` die Übergabe ab, weil der Updater die
+- **Der Launcher aktualisiert sich nur unter seinem Programmnamen** (`KERJAMI_Launcher.exe`). Läuft er unter einem
+  anderen Dateinamen (umbenannt, aus einem Testordner), lehnt `apply()` die Übergabe ab, weil der Austausch die
   Datei sonst nicht fände und neben dem alten Programm eine zweite Kopie entstünde.
 - **Anzeige:** Dashboard (Karte „Launcher“) und „Einstellungen → Über“ zeigen dasselbe Bedienfeld
   (`ui/LauncherUpdatePanel`). Texte stehen in `ui/OperationMessages`, die Rückfrage in `ui/Dialogs`.
   Beim Start zeigt die Anwendung nach dem Fenster eine Meldung über den Ausgang des letzten Updates oder über
   eine nachgeholte Wiederherstellung (`updateReportMessage`, `recoveryMessage`).
+
+### D-42 Tag-Präfix im Registry-Eintrag (`tag_prefix`)
+
+- **Anlass:** Die Projekte des Teams nennen ihre Release-Tags `TankstellenmealV0.12.3` und
+  `KERS_SubsystemsV0.3.1` (E-07). Der Launcher las bis dahin nur `1.2.3` oder `v1.2.3` (D-21) und hätte
+  beide Projekte als „ohne Release“ gezeigt.
+- **Regel:** Ein Eintrag darf `tag_prefix` haben. Ist er gesetzt, zählt ein Release nur, wenn sein Tag so
+  beginnt (Groß- und Kleinschreibung zählt). Der Rest wird wie bisher streng als SemVer gelesen (ein `v` davor
+  ist erlaubt), eine Vorabversion macht das Release nicht stabil (D-21). Tags ohne das Präfix werden übergangen,
+  auch ein schlichtes `v1.0.0`: Ein Projekt, das ein Präfix angibt, meint damit seine Tags. Ohne das Feld
+  ändert sich nichts.
+- **Form:** 1 bis 32 Zeichen aus Buchstaben, Ziffern, `.`, `_` und `-`, erstes Zeichen ein Buchstabe, kein
+  `/`. So bleibt jedes Tag ein einzelner Pfadabschnitt der Download-Adresse. Ein vorhandenes, aber leeres oder
+  ungültiges Feld lässt den Eintrag durchfallen (wie bei den anderen Feldern, D-16); fehlt es, ist es in
+  Ordnung. Die Release-Verwaltung prüft das Präfix vor jeder Anfrage erneut (D-22).
+- **Das Tag bleibt, wie es ist.** Die Download-Adresse wird mit dem echten Tag gebaut
+  (`…/releases/download/TankstellenmealV0.12.3/…`, D-23), gespeichert wird es ebenfalls so. Nur die Version
+  (`0.12.3`) kommt aus dem Rest. Installierte Version, Update-Vergleich und Anzeige arbeiten mit der Version.
+- **Grenzen:** Ein Präfix je Projekt. Wechselt ein Projekt später die Namensart seiner Tags, passt der Eintrag
+  nur zu einer davon. Die Versionsnummer danach muss streng SemVer sein, `0.12` oder `012.2` werden übergangen.
 
 ## Bekannte Grenzen
 
@@ -849,35 +906,33 @@ als einfacher Weg für Tests und Werkzeuge.
   bedienen lässt. Die Tests prüfen, dass gefragt wird und dass „Nein“ nichts verändert. Das echte
   Fenster (Text, Schaltflächen, Standardauswahl „Abbrechen“) wurde noch nicht angesehen. Dasselbe
   gilt für die Rückfrage zum Launcher-Update (`Dialogs::setLauncherUpdateConfirmationForTests`) und für
-  die Meldungsfenster des Updaters.
-- **Windows Defender meldet `LauncherUpdater.exe` fälschlich als Schadsoftware** (Stand 2026-11-10,
-  `Trojan:Win32/Bearfoos.A!ml`, eine Erkennung durch maschinelles Lernen). Auf dem Entwicklungsrechner wurde
-  die EXE kurz nach dem Bauen in die Quarantäne verschoben, im Release- und im Debug-Build und auch
-  nach dem Verschlanken des Updaters auf Qt Core allein (`launcher_base`); `KERJAMI.exe` wird nicht
-  gemeldet. Ursache ist vermutlich, dass ein kleines, nicht signiertes Programm ohne Fenster Dateien
-  tauscht und Programme startet. Folgen: Auf diesem Rechner schlagen die Tests, die die EXE brauchen
-  (`UpdaterTests`, `LauncherUpdateTests`), fehl, bis sie neu gebaut ist. Auf dem Rechner eines Nutzers kann
-  dasselbe ein Selbstupdate verhindern (der Launcher meldet dann „Übergabe“ fehlgeschlagen, das Update wird
-  nicht angewendet, nichts geht kaputt). Abhilfe ist eine Code-Signatur (Phase 8, braucht ein Zertifikat
-  und eine Entscheidung), eine Meldung als Fehlalarm an Microsoft oder eine Ausnahme, die der Nutzer selbst
-  einrichtet. Der Launcher ändert keine Sicherheitseinstellungen, und diese Arbeit hat sie ebenfalls
-  nicht geändert. Nicht umgesetzt: den Austausch als Betriebsart von `KERJAMI.exe` selbst laufen zu
-  lassen (die Kopie in `temp/` startet mit `--apply-update`). Das würde die eigene EXE vermeiden, weicht aber
-  vom Auftrag ab, der `LauncherUpdater.exe` nennt.
-- Die Austauschlogik kommt aus dem *neuen* Release (die Kopie des Updaters), die Prüfung des Pakets aus
-  dem *laufenden* Launcher. Ändert ein künftiges Release das Manifest-Schema, kann ein älterer Launcher
-  es nicht lesen und lehnt es ab; ein solcher Sprung braucht einmal eine Aktualisierung von Hand. Deshalb
-  bleibt Schema 1, bis es einen Grund gibt.
-- Ob der neue Launcher nach dem Austausch tatsächlich startet, prüft der Updater nicht. Er startet ihn und
+  die Meldungsfenster des Austauschs.
+- **Windows Defender hat die frühere, getrennte `LauncherUpdater.exe` fälschlich als Schadsoftware
+  gemeldet** (Stand 2026-11-10, `Trojan:Win32/Bearfoos.A!ml`, eine Erkennung durch maschinelles Lernen):
+  Quarantäne kurz nach dem Bauen, im Release- wie im Debug-Build und auch nach dem Verschlanken auf Qt Core
+  allein. Das war, neben dem Wunsch nach einer einzigen Datei, der Grund, den Austausch in `KERJAMI_Launcher.exe`
+  zu verlegen (D-40); die zweite EXE gibt es nicht mehr. `KERJAMI_Launcher.exe` wurde nie gemeldet. Ausgeschlossen
+  ist es nicht, dass ein Scanner die Kopie in `temp/` beanstandet, wenn sie mit `--apply-update` startet:
+  Getroffen wurde damals die Datei beim Scan, nicht ihr Verhalten. Bei allen Testläufen mit der echten
+  `KERJAMI_Launcher.exe` (Release und Debug, die Tests starten sie als Kopie und tauschen echte Dateien aus) gab es
+  keine Meldung. Falls es doch geschieht, meldet der Launcher „Übergabe fehlgeschlagen“ oder der Austausch
+  kommt nicht zustande; das Update wird dann nicht angewendet, und nichts geht kaputt. Abhilfe wäre eine
+  Code-Signatur (Phase 8, braucht ein Zertifikat und eine Entscheidung) oder eine Meldung als Fehlalarm an
+  Microsoft. Der Launcher ändert keine Sicherheitseinstellungen.
+- Der Austausch kommt aus dem *laufenden* Launcher, ebenso wie die Prüfung des Pakets. Eine Änderung am
+  Austausch oder am Manifest-Schema wirkt deshalb erst, wenn die Version installiert ist, die sie
+  enthält. Ein älterer Launcher versteht ein neues Schema nicht und lehnt das Manifest ab; ein solcher
+  Sprung braucht einmal eine Aktualisierung von Hand. Deshalb bleibt Schema 1, bis es einen Grund gibt.
+- Ob der neue Launcher nach dem Austausch tatsächlich startet, prüft der Austausch nicht. Er startet ihn und
   merkt es nur, wenn die Datei fehlt. Ein Launcher, der gleich wieder abstürzt, wird nicht zurückgerollt; die
   Dateien der alten Version liegen in `updater/backups/` (die zwei letzten Stände bleiben erhalten).
 - Das Release-ZIP ist das ganze portable Paket (etwa 30 MB). Beim Austausch bleiben Dateien mit gleichem
   Hash unangetastet, geladen wird aber immer alles.
 - Dateien, die ein früheres Release mitgebracht hat und die ein neues Manifest nicht in `remove` nennt,
-  bleiben liegen. Der Updater löscht nichts, was nicht ausdrücklich genannt ist.
-- Der Updater zeigt Probleme mit einem schlichten Windows-Meldungsfenster in der Sprache des Programms
+  bleiben liegen. Der Austausch löscht nichts, was nicht ausdrücklich genannt ist.
+- Der Austausch zeigt Probleme mit einem schlichten Windows-Meldungsfenster in der Sprache des Programms
   (Deutsch), nicht im Stil der Anwendung. Der Normalfall ist der Bericht, den der Launcher beim nächsten
   Start anzeigt.
 - Ein Selbstupdate gegen ein echtes GitHub-Release ist noch nicht getestet (das Repository hat kein
-  Release). Der Test `selfUpdateEndToEnd` fährt die ganze Kette mit der echten `LauncherUpdater.exe` gegen
-  einen lokalen Server, der GitHub nachbildet.
+  Release). Der Test `selfUpdateEndToEnd` fährt die ganze Kette mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus
+  gegen einen lokalen Server, der GitHub nachbildet.

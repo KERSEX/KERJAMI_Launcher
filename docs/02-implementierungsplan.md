@@ -15,15 +15,16 @@ launcher_ui (static)   MainWindow, Seiten, Controls   Qt Widgets, kein Netzwerk,
 launcher_core (static) Branding, SettingsManager,     Qt Core + Network: github/, downloads/,
                        Manager und Dienste            installer/, process/, updater/
    │
-launcher_base (static) PathManager, Logger, JsonFile, Qt Core: alles, was auch der Updater braucht
-                       SemVer, FileOps, HashVerifier,
+launcher_base (static) PathManager, Logger, JsonFile, Qt Core: alles, was auch der Austausch der
+                       SemVer, FileOps, HashVerifier,  Programmdateien braucht
                        ArchiveValidator, RegistryParser,
                        UpdateManifest, UpdateTransaction,
-                       UpdaterProtocol
+                       UpdaterProtocol, LauncherUpdater
 ```
 
-`LauncherUpdater.exe` (Phase 6) linkt nur `launcher_base`: kein Netzwerk, keine Fenster. Die Tests
-linken `launcher_core`, der UI-Test zusätzlich `launcher_ui`.
+Es gibt nur **eine EXE**: Der Austausch der Programmdateien beim Selbstupdate (Phase 6) ist eine
+Betriebsart von `KERJAMI_Launcher.exe` (`--apply-update`) und liegt in `launcher_base`: kein Netzwerk, keine Fenster.
+Die Tests linken `launcher_core`, der UI-Test zusätzlich `launcher_ui`.
 
 Regeln:
 
@@ -40,8 +41,7 @@ Regeln:
 
 ```
 <Programmordner>/
-├── KERJAMI.exe
-├── LauncherUpdater.exe          Phase 6
+├── KERJAMI_Launcher.exe
 ├── launcher/
 │   ├── settings.json            Benutzereinstellungen (Phase 1)
 │   ├── launcher.json            Installationsstand, zuletzt gestartet (Phase 4)
@@ -53,7 +53,7 @@ Regeln:
 ├── downloads/launcher/          das Release-ZIP des Launchers, bis es geprüft ist (Phase 6)
 ├── temp/                        download-<id>.part, staging-<Projekt>/, uninstall-<Projekt>/,
 │                                update-<Version>/ (entpacktes Launcher-Release),
-│                                updater-<Version>/ (die laufende Kopie des Updaters)
+│                                updater-<Version>/ (die laufende Kopie des Launchers für den Austausch)
 ├── updater/                     Journal, Backups der ersetzten Programmdateien, Bericht, Sperre (Phase 6)
 ├── cache/                       Registry-Cache, Release-Antworten
 └── logs/                        launcher.log, updater.log
@@ -69,7 +69,7 @@ In JSON-Dateien stehen nur Pfade relativ zum Programmordner
 ```cpp
 namespace launcher::branding {          // Werte aus cmake/Branding.cmake
 QString productName();  QString displayName();  QString version();
-QString executableFileName();  QString updaterFileName();
+QString executableFileName();  QString updateAssetPattern();
 QString gitHubOwner();  QString launcherRepository();  QUrl registryUrl();
 }
 
@@ -113,7 +113,7 @@ struct Project {                        // models/Project.h, nur validierte Wert
     QStringList tags;
     bool enabled, featured;
     ReleaseChannel releaseChannel;      // nur Stable in V1
-    QString assetPattern, executable, installDirectory;
+    QString tagPrefix, assetPattern, executable, installDirectory;   // tagPrefix optional (D-42)
 };
 
 namespace RegistryParser {              // github/RegistryParser.h, reine Funktionen
@@ -322,8 +322,8 @@ Grenzen: [03-entscheidungen.md](03-entscheidungen.md), D-35 bis D-38.
 ### Phase 6 – Selbstupdate (umgesetzt)
 
 Das Release-Asset des Launchers heißt `KERJAMI-<Version>-Windows-x64-Portable.zip`
-(`branding::updateAssetPattern()`). Es enthält die Programmdateien an der Wurzel und die Datei
-`update-manifest.json` (D-39).
+(`branding::updateAssetPattern()`). Es enthält `KERJAMI_Launcher.exe` an der Wurzel und die Datei
+`update-manifest.json` (D-39). Das Programm ist eine einzige Datei.
 
 ```cpp
 enum class LauncherUpdateState { Idle, Checking, UpToDate, Available, Downloading, Preparing, Ready, Applying, Failed };
@@ -332,7 +332,7 @@ class LauncherUpdateManager : public QObject {    // updater/, D-41
     LauncherUpdateInfo info() const;                          // Zustand, Versionen, Fortschritt, Fehler
     void install();                                           // laden, prüfen, entpacken; danach folgt apply()
     void cancel();
-    void apply();                                             // Updater vorbereiten und starten, Launcher beendet sich
+    void apply();                                             // Kopie des Launchers starten, Launcher beendet sich
     void setBusyCheck(std::function<bool()>);                 // laufende Installationen blockieren den Neustart
 signals: void infoChanged();  void restartRequested();
 };
@@ -340,33 +340,33 @@ signals: void infoChanged();  void restartRequested();
 struct PackageRequest { /* ZIP, Hash, Staging-Ordner, Erwartungen */ };
 namespace UpdatePackage { PackageResult prepare(const PackageRequest&, cancel, progress); }   // D-39
 
-// launcher_base, gemeinsam mit dem Updater
+// launcher_base, gemeinsam mit dem Austausch
 namespace UpdateManifestFormat { ManifestParseResult parse(json, ManifestExpectations); }     // D-39
 namespace UpdateTransaction {                                                                  // D-40
     TransactionResult apply(const TransactionPlan&);                  // Journal, Backup, Austausch, Rollback
     TransactionResult recover(const QString& rootDir, const QString& journalFile);
 }
-struct UpdaterJob { /* Ordner, Versionen, Dateinamen, PID des Launchers, Wartezeit */ };       // job.json
+struct UpdaterJob { /* Ordner, Versionen, Dateiname, PID des Launchers, Wartezeit */ };         // job.json
 struct UpdateReport { /* Status, Versionen, Detail, Backup */ };                               // last-update.json
 namespace UpdateStartup { StartupUpdateOutcome run(const PathManager&, int waitMs = 60000); }  // beim Start des Launchers
 
-// updater/LauncherUpdater.exe: --job <job.json> [--quiet]; Exitcodes 0 Erfolg, 1 zurückgerollt,
-// 2 nichts geändert, 3 fehlgeschlagen, 4 ungültiger Auftrag
+// KERJAMI_Launcher.exe --apply-update --job <job.json> [--quiet]   (LauncherUpdater::runProgram, vor jedem Fenster)
+// Exitcodes: 0 Erfolg, 1 zurückgerollt, 2 nichts geändert, 3 fehlgeschlagen, 4 ungültiger Auftrag
 ```
 
 Ablauf: Prüfung über dieselben Release-Abfragen wie bei Projekten (reservierte ID `launcher`, D-39) →
 „Aktualisieren“ mit Rückfrage (Changelog) → Download nach `downloads/launcher/` → SHA-256 →
 Archivprüfung → Entpacken nach `temp/update-<Version>/` → Manifest und Hash jeder Datei prüfen →
-Kopie von `LauncherUpdater.exe` nach `temp/updater-<Version>/` → Zustand „bereit“ → `apply()`:
-`job.json` schreiben, die Kopie starten, Launcher beenden. `apply()` folgt von selbst, sobald das Paket
-bereit ist und keine Projekt-Installation läuft; sonst wartet es auf „Jetzt neu starten“. Der
-Updater wartet auf das Prozessende des Launchers (Handle auf die PID), tauscht die Dateien aus dem
-Manifest in einer Transaktion (Journal, Backups, Rollback; die Programmdatei des Launchers zuletzt),
-schreibt `updater/last-update.json` und startet den Launcher neu. Weil die laufende Kopie in `temp/`
-liegt, kann auch `LauncherUpdater.exe` selbst ersetzt werden. Der Updater fasst nur Dateien an, die
-im Manifest stehen; die Ordner mit Nutzerdaten sind gesperrt. Beim nächsten Start räumt der Launcher
-auf: `UpdateStartup::run` wartet auf einen noch laufenden Updater, schließt eine unterbrochene
-Transaktion ab (`recover`) und zeigt den Bericht einmal an.
+Zustand „bereit“ → `apply()`: den laufenden Launcher nach `temp/updater-<Version>/` kopieren,
+`job.json` schreiben, die Kopie mit `--apply-update` starten, Launcher beenden. `apply()` folgt von
+selbst, sobald das Paket bereit ist und keine Projekt-Installation läuft; sonst wartet es auf „Jetzt
+neu starten“. Die Kopie wartet auf das Prozessende des Launchers (Handle auf die PID), tauscht die
+Dateien aus dem Manifest in einer Transaktion (Journal, Backups, Rollback; die Programmdatei des
+Launchers zuletzt), schreibt `updater/last-update.json` und startet den Launcher neu. Weil die laufende
+Kopie in `temp/` liegt, kann die Datei `KERJAMI_Launcher.exe` im Programmordner ersetzt werden. Der Austausch
+fasst nur Dateien an, die im Manifest stehen; die Ordner mit Nutzerdaten sind gesperrt. Beim nächsten
+Start räumt der Launcher auf: `UpdateStartup::run` wartet auf einen noch laufenden Austausch, schließt
+eine unterbrochene Transaktion ab (`recover`) und zeigt den Bericht einmal an.
 
 Die Oberfläche zeigt den Stand auf dem Dashboard und in „Einstellungen → Über“
 (`ui/LauncherUpdatePanel`): „Nach Updates suchen“, „Aktualisieren“ mit Rückfrage, „Abbrechen“ und
@@ -388,11 +388,11 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `SettingsTests.cpp` | Persistenz, Korruption, Migration, Einstellungen pro Projekt | 1, 5 |
 | `LoggerTests.cpp` | Rotation, Größenlimit, Pfad-Schwärzung | 1 |
 | `UiSmokeTests.cpp` | Navigation, Einstellungen, Bibliothek mit Projektkarten (Update, Modus, läuft), Downloads-Seite, Anzeige des Launcher-Updates | 1–6 |
-| `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln | 2 |
+| `RegistryTests.cpp` | Parser: alle Prüfregeln, Duplikate, Grenzen, Pfad- und Namensregeln, Tag-Präfix | 2, 6 |
 | `GitHubClientTests.cpp` | URL-Policy, Wiederholungen, Rate Limit, Größe, Redirects, Abbruch, Speichern in Datei | 2–3 |
 | `RegistryManagerTests.cpp` | Laden, Cache, Offline-Verhalten, beschädigter Cache | 2 |
 | `SemVerTests.cpp` | Gültige und ungültige Versionen, Reihenfolge nach der SemVer-Spezifikation | 3 |
-| `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, Prüfsummendatei, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3–4 |
+| `ReleaseTests.cpp` | Release-Parser, Asset-Auswahl, Digest, Prüfsummendatei, Tag-Präfix, ReleaseManager (Fehler, Rate Limit, Duplikate) | 3–4, 6 |
 | `DownloadTests.cpp` | Tempo, Formatierung, Warteschlange, Abbruch, Größen- und Speicherfehler | 3 |
 | `SecurityTests.cpp` | SHA-256, Prüfsummendatei, ZIP-Leser (kaputte und feindliche Archive), Pfadregeln, Validator, Extraktor | 4 |
 | `InstallerTests.cpp` | Installation, Update mit Backup, Rollback, Deinstallation, Liste der Installationen, laufendes Programm, Links | 4 |
@@ -400,8 +400,8 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | `ProcessTests.cpp` | Start, Mehrfachstart, Ende und Exitcode, Programm von außen gestartet, Nachkommen außerhalb des Ordners, Threads (mit dem Hilfsprogramm `SleepyApp`) | 5 |
 | `UpdateTests.cpp` | Prüfung, manuell und automatisch, laufendes Projekt, Vormerkung, Fehler, Warteschlange, Modi je Projekt, Netzwerkfehler | 5 |
 | `UpdateTransactionTests.cpp` | Manifest-Parser (Tabelle feindlicher Manifeste), Transaktion: Erfolg, Ablehnungen, Rollback bei jedem Schritt, Absturz nach jedem Schritt und `recover`, `UpdateStartup` | 6 |
-| `UpdaterTests.cpp` | Die echte `LauncherUpdater.exe` mit dem Hilfsprogramm `SleepyApp` als Launcher: Austausch, Warten auf das Prozessende, Ablehnung, Bericht, Neustart, Sperre | 6 |
-| `LauncherUpdateTests.cpp` | Prüfung und Zustände, feindliche Pakete, Abbruch, Busy, Übergabe an den Updater, Selbstupdate von Anfang bis Ende gegen einen lokalen Server | 6 |
+| `UpdaterTests.cpp` | Die echte `KERJAMI_Launcher.exe` im Modus `--apply-update` mit dem Hilfsprogramm `SleepyApp` als Launcher: Austausch, Warten auf das Prozessende, Ablehnung, Bericht, Neustart, Sperre | 6 |
+| `LauncherUpdateTests.cpp` | Prüfung und Zustände, feindliche Pakete, Abbruch, Busy, Übergabe an den Austausch, Selbstupdate von Anfang bis Ende gegen einen lokalen Server | 6 |
 
 ## Stand
 
@@ -412,7 +412,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
 | 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); ein Test mit echten GitHub-Releases fehlt noch, er braucht ein Testprojekt mit ZIP-Releases (E-02) |
 | 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; wie Phase 4 ohne Test gegen echte GitHub-Releases (E-02) |
-| 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `LauncherUpdater.exe` gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Windows Defender meldet den unsignierten Updater fälschlich als Schadsoftware (D-40, Bekannte Grenzen) |
+| 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Das Programm ist eine einzige Datei (D-40) |
 | 7 | UI-Fertigstellung | offen |
 | 8 | Portable Release | offen; braucht Entscheidung E-01 |
 

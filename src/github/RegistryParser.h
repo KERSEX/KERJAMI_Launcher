@@ -84,6 +84,11 @@ bool isValidInstallDirectory(const QString& directory);
 /// A ZIP file name; "*" is the only wildcard.
 bool isValidAssetPattern(const QString& pattern);
 
+/// The text a release tag starts with before the version: 1 to 32 letters, digits,
+/// ".", "_" or "-", beginning with a letter. No "/", so that a tag stays one path
+/// segment of a download address.
+bool isValidTagPrefix(const QString& prefix);
+
 /// A relative path with "/" separators that ends in ".exe" and cannot leave the install folder.
 bool isValidExecutablePath(const QString& path);
 

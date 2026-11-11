@@ -1,4 +1,4 @@
-// Windows resources of the launcher and the updater executable: icon and version information.
+// Windows resources of the launcher executable: icon and version information.
 // Generated from cmake/Branding.cmake and CMakeLists.txt; edit launcher.rc.in instead.
 // Only numeric constants are used so that no Windows header is needed and any
 // resource compiler (rc, windres, llvm-rc) accepts the file.

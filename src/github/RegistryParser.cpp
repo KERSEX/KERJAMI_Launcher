@@ -99,6 +99,15 @@ public:
         return raw;
     }
 
+    /// Like identifier(), but the key may be missing; it then stays empty. When it is
+    /// there it must be valid.
+    QString optionalIdentifier(QLatin1StringView key, bool (*isValid)(const QString&), const QString& rule)
+    {
+        if (!ok() || m_object.value(key).isUndefined())
+            return {};
+        return identifier(key, isValid, rule);
+    }
+
     bool flag(QLatin1StringView key, bool required, bool fallback)
     {
         if (!ok())
@@ -231,6 +240,8 @@ std::optional<Project> parseEntry(const QJsonValue& value, QString* error)
     project.featured = reader.flag("featured"_L1, false, false);
     reader.expectIfPresent("release_channel"_L1, "stable"_L1);
     project.releaseChannel = ReleaseChannel::Stable;
+    project.tagPrefix = reader.optionalIdentifier("tag_prefix"_L1, RegistryParser::isValidTagPrefix,
+        u"1 to 32 letters, digits, . _ - and starting with a letter"_s);
     project.assetPattern = reader.identifier("asset_pattern"_L1, RegistryParser::isValidAssetPattern,
         u"a ZIP file name without a path; * is the only wildcard"_s);
     project.executable = reader.identifier("executable"_L1, RegistryParser::isValidExecutablePath,
@@ -295,6 +306,11 @@ bool isValidAssetPattern(const QString& pattern)
 {
     return pattern.endsWith(".zip"_L1, Qt::CaseInsensitive)
         && matchesWhole(u"[A-Za-z0-9._*+()-]{1,128}"_s, pattern);
+}
+
+bool isValidTagPrefix(const QString& prefix)
+{
+    return matchesWhole(u"[A-Za-z][A-Za-z0-9._-]{0,31}"_s, prefix);
 }
 
 bool isValidExecutablePath(const QString& path)

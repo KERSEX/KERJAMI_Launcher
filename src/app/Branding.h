@@ -21,9 +21,6 @@ QString version();
 /// File name of the launcher executable including ".exe".
 QString executableFileName();
 
-/// File name of the self-update helper including ".exe".
-QString updaterFileName();
-
 /// GitHub account that owns the launcher repository.
 QString gitHubOwner();
 

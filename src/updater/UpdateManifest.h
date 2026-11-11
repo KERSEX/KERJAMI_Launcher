@@ -26,8 +26,7 @@ struct UpdateManifest {
     int schemaVersion = 0;
     QString product;
     QString version;
-    QString launcher; ///< Path of the launcher program, one of the files.
-    QString updater;  ///< Path of the updater program, one of the files.
+    QString launcher; ///< Path of the launcher program, one of the files. It also does the update.
     QList<ManifestFile> files;
     QStringList remove; ///< Files of an earlier release that no longer belong to the program.
 
@@ -38,8 +37,7 @@ struct UpdateManifest {
 /// What a manifest must say about itself to be accepted.
 struct ManifestExpectations {
     QString product;      ///< Product name; a package of another product is refused.
-    QString launcherFile; ///< File name of the launcher program, e.g. "KERJAMI.exe".
-    QString updaterFile;  ///< File name of the updater program.
+    QString launcherFile; ///< File name of the launcher program, e.g. "KERJAMI_Launcher.exe".
 };
 
 struct ManifestParseResult {
@@ -62,7 +60,8 @@ inline const QString kFileName = QStringLiteral("update-manifest.json");
 /// is treated as untrusted input: every path must be a plain relative file
 /// path of the kind Windows can store, must not lie in a folder the launcher
 /// keeps for the user's data, and must not appear twice (also not when only the
-/// case differs). The launcher and updater programs must be listed.
+/// case differs). The launcher program must be listed. Keys this version does not
+/// know (an "updater" from a draft of the format) are ignored.
 ManifestParseResult parse(const QByteArray& json, const ManifestExpectations& expectations);
 
 /// A manifest as JSON text, for tests and for the packaging script's reference.

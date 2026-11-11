@@ -7,9 +7,9 @@
 set(BRAND_PRODUCT_NAME        "KERJAMI")
 set(BRAND_DISPLAY_NAME        "KERJAMI Launcher")
 
-# File names without extension.
-set(BRAND_EXECUTABLE_NAME     "KERJAMI")
-set(BRAND_UPDATER_NAME        "LauncherUpdater")
+# File name without extension. The launcher is a single program: it also does the
+# update of itself (docs/03-entscheidungen.md, D-40).
+set(BRAND_EXECUTABLE_NAME     "KERJAMI_Launcher")
 
 # GitHub repository that publishes the launcher's own releases.
 set(BRAND_GITHUB_OWNER        "KERSEX")

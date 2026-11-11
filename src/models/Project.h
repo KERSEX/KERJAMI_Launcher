@@ -26,6 +26,8 @@ struct Project {
     bool enabled = true; ///< Only enabled projects are shown.
     bool featured = false;
     ReleaseChannel releaseChannel = ReleaseChannel::Stable;
+    QString tagPrefix; ///< Text before the version in a release tag, e.g. "KERS_SubsystemsV". Empty: the tag
+                       ///< is the version, with an optional "v".
     QString assetPattern;     ///< File name of the ZIP release asset; "*" matches any characters.
     QString executable;       ///< Path of the start file inside the archive, with "/" separators.
     QString installDirectory; ///< Folder name below the project library.
