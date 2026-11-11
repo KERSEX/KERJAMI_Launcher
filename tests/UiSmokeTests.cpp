@@ -155,6 +155,7 @@ private slots:
     void dashboardListsInstalledProjectsUpdatesAndRecentStarts();
     void dashboardWithoutProjectsSaysSo();
     void dashboardStartsAProject();
+    void dashboardOffersNoDetailsForAProjectThatLeftTheList();
 
     void settingsShowTheStorageAndCleanUpOnRequest();
     void settingsDoNotCleanUpWhileSomethingRuns();
@@ -1562,6 +1563,31 @@ void UiSmokeTests::dashboardWithoutProjectsSaysSo()
             ->findChild<QLabel*>(u"DashboardEmpty"_s)
             ->text()
             .contains(u"aktuell"_s));
+}
+
+void UiSmokeTests::dashboardOffersNoDetailsForAProjectThatLeftTheList()
+{
+    // "lap-timer" is installed but the list does not know it (any more); "pit-radio" is in the list.
+    QVERIFY(loadProjects(*m_registry, QJsonArray {sampleProjects().at(2)}));
+    QVERIFY(installFake(*m_layout, *m_installed, u"lap-timer"_s, u"1.4.2"_s));
+    QVERIFY(installFake(*m_layout, *m_installed, u"pit-radio"_s, u"1.0.0"_s));
+
+    MainWindow window(context());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    auto* card = window.findChild<QFrame*>(u"DashboardInstalled"_s);
+    int rows = 0;
+    for (QWidget* row : card->findChildren<QWidget*>(u"DashboardRow"_s)) {
+        ++rows;
+        const bool inList = row->property("projectId").toString() == u"pit-radio"_s;
+        QCOMPARE(row->findChild<QPushButton*>(u"DashboardDetails"_s) != nullptr, inList);
+        // Starting is still possible: the program is installed whatever the list says.
+        QVERIFY(row->findChild<QPushButton*>(u"DashboardStart"_s) != nullptr);
+    }
+    QCOMPARE(rows, 2);
+    // Its name is the id, since the list has no name for it.
+    QVERIFY(dashboardRows(window, "DashboardInstalled").first().startsWith(u"lap-timer | "_s));
 }
 
 void UiSmokeTests::dashboardStartsAProject()

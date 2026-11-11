@@ -184,11 +184,19 @@ QWidget* DashboardPage::createProjectRow(
         layout->addWidget(start, 0, Qt::AlignVCenter);
     }
 
-    auto* details = new QPushButton(tr("Details"), row);
-    details->setObjectName("DashboardDetails");
-    details->setCursor(Qt::PointingHandCursor);
-    connect(details, &QPushButton::clicked, this, [this, projectId] { emit projectRequested(projectId); });
-    layout->addWidget(details, 0, Qt::AlignVCenter);
+    // The detail page shows what the list says about a project. An installed project that
+    // has left the list has nothing to show, so it gets no button that would do nothing.
+    const QList<Project>& listed = m_context.registry.projects();
+    const bool inList = std::any_of(listed.cbegin(), listed.cend(),
+        [&projectId](const Project& project) { return project.id == projectId; });
+    if (inList) {
+        auto* details = new QPushButton(tr("Details"), row);
+        details->setObjectName("DashboardDetails");
+        details->setCursor(Qt::PointingHandCursor);
+        connect(
+            details, &QPushButton::clicked, this, [this, projectId] { emit projectRequested(projectId); });
+        layout->addWidget(details, 0, Qt::AlignVCenter);
+    }
     return row;
 }
 
