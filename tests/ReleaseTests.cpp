@@ -137,6 +137,7 @@ private slots:
     void managerOffersAChecksumFileOnlyWithoutDigest();
     void downloadAddressIsBuiltNotTaken();
     void managerReadsTagsWithAPrefixAndKeepsTheRawTag();
+    void theBuiltInEntryOfTankstellenmealFindsItsRealReleases();
     void tagWithBuildMetadataGivesAValidAddress();
     void managerReportsNoStableRelease();
     void newestReleaseWithoutTheFileIsNotReplacedByAnOlderOne();
@@ -708,6 +709,48 @@ void ReleaseTests::managerReadsTagsWithAPrefixAndKeepsTheRawTag()
     // The address is built with the tag as GitHub knows it, prefix included.
     QCOMPARE(
         outcome.selection.downloadUrl.path(), u"/KERSEX/Demo/releases/download/DemoV1.2.0/Demo-1.2.0.zip"_s);
+}
+
+void ReleaseTests::theBuiltInEntryOfTankstellenmealFindsItsRealReleases()
+{
+    // The four releases of github.com/Amil300/Tankstellenmeal as they were published on 2026-11-10: tags,
+    // file names, sizes and digests as GitHub reported them. Two of the tags are not versions.
+    const auto zip = [](const QString& version, qint64 size, const QString& digest) {
+        return QJsonArray {asset(u"Tankstellenmeal_"_s + version + u".zip"_s, size, digest)};
+    };
+    m_next = body(list({
+        release(u"TankstellenmealV012.2"_s, // mistyped: leading zero, the file is 0.12.1
+            zip(u"0.12.1"_s, 414233278,
+                u"b064ddb1b59d03c4fc5d967480c2daa84e75a01e8a1b9511762fa96f36a011c3"_s)),
+        release(u"TankstellenmealV0.12.3"_s,
+            zip(u"0.12.3"_s, 414251249,
+                u"a6037be3aef95626ceda80e73537791074d7bf6508f88399f3a621a6d86f1a27"_s)),
+        release(u"TankstellenmealV0.12.2"_s,
+            zip(u"0.12.2"_s, 414238675,
+                u"f3153e37c2fddad12a96d54e0f550cdfdcc44c015435a8d3e4eaa14614ca5bcd"_s)),
+        release(u"TankstellenmealV0.12"_s, // two numbers: not a version
+            zip(u"0.12.0"_s, 414228910,
+                u"e039f6ee03126fb9e08371100b0d5fc871109c2dbbe2617e90ba98e8f4f27484"_s)),
+    }));
+
+    launcher::RegistryManager registry;
+    QVERIFY(registry.loadBuiltIn());
+    const auto entry = std::find_if(registry.projects().cbegin(), registry.projects().cend(),
+        [](const Project& p) { return p.id == u"tankstellenmeal"_s; });
+    QVERIFY(entry != registry.projects().cend());
+
+    auto manager = makeManager();
+    const Outcome outcome = fetch(*manager, *entry);
+    QVERIFY(outcome.ready);
+    QCOMPARE(outcome.selection.release.tag, u"TankstellenmealV0.12.3"_s);
+    QCOMPARE(outcome.selection.release.version.toString(), u"0.12.3"_s);
+    QCOMPARE(outcome.selection.asset.name, u"Tankstellenmeal_0.12.3.zip"_s);
+    QCOMPARE(outcome.selection.asset.size, qint64(414251249));
+    QCOMPARE(outcome.selection.asset.sha256,
+        u"a6037be3aef95626ceda80e73537791074d7bf6508f88399f3a621a6d86f1a27"_s);
+    QVERIFY(outcome.selection.hasTrustedHashSource());
+    QCOMPARE(outcome.selection.downloadUrl.path(),
+        u"/Amil300/Tankstellenmeal/releases/download/TankstellenmealV0.12.3/Tankstellenmeal_0.12.3.zip"_s);
 }
 
 void ReleaseTests::tagWithBuildMetadataGivesAValidAddress()

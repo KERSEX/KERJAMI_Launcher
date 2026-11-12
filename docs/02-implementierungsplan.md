@@ -461,9 +461,9 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 | Phase | Inhalt | Status |
 |---|---|---|
 | 1 | Grundgerüst | umgesetzt |
-| 2 | Registry | umgesetzt; seit D-43 steckt die Liste im Programm (kein Abruf, kein Cache). Sie ist noch leer, ihr Inhalt hängt an Angaben des Teams (E-07) |
+| 2 | Registry | umgesetzt; seit D-43 steckt die Liste im Programm (kein Abruf, kein Cache). Sie enthält KERS Overlay und Tankstellenmeal; die übrigen vier Projekte brauchen zuerst ein Release (E-07) |
 | 3 | Releases und Downloads | umgesetzt und gegen GitHub geprüft (nur Metadaten); ein Download-Knopf fehlt bis Phase 4 |
-| 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); echt gegen GitHub getestet ist die Installation einer einzelnen EXE (KERS Overlay, 2026-11-11); mit einem ZIP-Release fehlt der Test noch (E-02) |
+| 4 | Installation | umgesetzt und gegen einen lokalen Server und echte Dateisystem-Fälle geprüft (gesperrte Dateien, Junctions); echt gegen GitHub getestet sind die Installation einer einzelnen EXE (KERS Overlay, 2026-11-11) und die eines ZIP-Releases mit Start (Tankstellenmeal, 414 MB, 2026-11-12); ein Update zwischen zwei echten Versionen fehlt noch (E-02) |
 | 5 | Projekt-Updates | umgesetzt, gegen einen lokalen Server und echte Prozesse geprüft; ein Update zwischen zwei echten Versionen ist nicht gegen GitHub getestet (E-02) |
 | 6 | Launcher-Selbstupdate | umgesetzt, mit der echten `KERJAMI_Launcher.exe` im Austausch-Modus gegen einen lokalen Server geprüft; ein Test gegen ein echtes Release in `KERSEX/KERJAMI_Launcher` fehlt, das Repository hat noch keines. Das Programm ist eine einzige Datei (D-40) |
 | 7 | UI-Fertigstellung | umgesetzt: Detailseite, Dashboard, Speicherverwaltung, Einzel-EXE-Projekte; danach neu geordnet in Store, Bibliothek und Dashboard (D-48); getestet mit Screenshots; das Theme bleibt dunkel (E-05) |
@@ -472,7 +472,7 @@ Funktionen, Netzwerk-Tests laufen gegen einen lokalen `QTcpServer` im Testprozes
 Offene Entscheidungen stehen in [03-entscheidungen.md](03-entscheidungen.md):
 
 - E-01 Compiler und Qt-Variante (auch wegen der Qt-Lizenz, E-06)
-- E-02 Testprojekt mit ZIP-Releases für den Test in Phase 4
+- E-02 Test eines Updates zwischen zwei echten Versionen (ZIP und einzelne EXE sind echt getestet)
 - E-05 Theme-Auswahl, E-06 Umfang der GitHub-Veröffentlichung
 
 Alle acht Phasen sind umgesetzt. Bis zu einem öffentlichen Release bleibt: E-01 entscheiden, die Lizenzhinweise

@@ -312,6 +312,52 @@ private slots:
         QVERIFY(leftovers().isEmpty());
     }
 
+    /// A game packaged with Unreal Engine and zipped on Windows (the layout of Tankstellenmeal's release):
+    /// names written with backslashes, entries of a folder in front of its files, the system byte of MS-DOS,
+    /// no attributes, no UTF-8 flag, everything below one top folder, the start file a small program in it.
+    void install_aZipMadeOnWindowsWithBackslashesAndAFolderOnTop()
+    {
+        const auto dosFile = [](const QString& name, const QByteArray& data, bool deflate) {
+            testzip::Entry entry = testzip::file(name, data, deflate);
+            entry.utf8Flag = false;
+            entry.hostSystem = 0; // MS-DOS
+            return entry;
+        };
+        const auto dosFolder = [](const QString& name) {
+            testzip::Entry entry = testzip::folder(name);
+            entry.utf8Flag = false;
+            entry.hostSystem = 0;
+            return entry;
+        };
+        const QByteArray stub = QByteArray("MZ") + QByteArray(300, 's');
+        const QList<testzip::Entry> game {
+            dosFolder(u"Game\\Engine\\"_s),
+            dosFolder(u"Game\\Game\\"_s),
+            dosFile(u"Game\\README.txt"_s, "read me", true),
+            dosFile(u"Game\\Engine\\Binaries\\ThirdParty\\Ogg\\Win64\\VS2015\\libogg_64.dll"_s, "dll", true),
+            dosFile(u"Game\\Game\\Content\\Paks\\Game-Windows.ucas"_s, QByteArray(5000, 'u'), false),
+            dosFile(u"Game\\Game\\Binaries\\Win64\\Game-Win64-Shipping.exe"_s, "MZ-shipping", true),
+            dosFile(u"Game\\Game.exe"_s, stub, true),
+        };
+
+        m_project.executable = u"Game/Game.exe"_s;
+        const InstallResult result = installAndWait(makeRequest(game, u"0.12.3"_s));
+        QVERIFY2(result.ok(), qPrintable(result.detail));
+
+        // Backslashes became folders; the start file is where the entry of the list says.
+        QCOMPARE(readFile(current(u"Game/Game.exe"_s)), stub);
+        QCOMPARE(readFile(current(u"Game/README.txt"_s)), QByteArray("read me"));
+        QCOMPARE(readFile(current(u"Game/Game/Content/Paks/Game-Windows.ucas"_s)), QByteArray(5000, 'u'));
+        QCOMPARE(readFile(current(u"Game/Game/Binaries/Win64/Game-Win64-Shipping.exe"_s)),
+            QByteArray("MZ-shipping"));
+        QVERIFY(QFileInfo(current(u"Game/Engine/Binaries/ThirdParty/Ogg/Win64/VS2015"_s)).isDir());
+        // Nothing was written under a name with a backslash in it.
+        for (const QString& name : listFiles(current()))
+            QVERIFY2(!name.contains(u'\\'), qPrintable(name));
+        QCOMPARE(m_installed->get(u"test-tool"_s)->executable, u"Game/Game.exe"_s);
+        QVERIFY2(leftovers().isEmpty(), qPrintable(leftovers().join(u',')));
+    }
+
     void install_prunesOldBackups()
     {
         for (const QString& version : {u"1.0.0"_s, u"1.1.0"_s, u"1.2.0"_s, u"1.3.0"_s}) {

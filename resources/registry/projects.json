@@ -18,6 +18,22 @@
       "executable": "KERS_Subsystems.exe",
       "keep": ["data"],
       "install_directory": "KERS_Overlay"
+    },
+    {
+      "id": "tankstellenmeal",
+      "name": "Tankstellenmeal",
+      "description": "Spiel von Amil, entwickelt mit der Unreal Engine 5.",
+      "owner": "Amil300",
+      "repository": "Tankstellenmeal",
+      "category": "Spiele",
+      "tags": ["Spiel", "Unreal Engine"],
+      "enabled": true,
+      "featured": false,
+      "release_channel": "stable",
+      "tag_prefix": "TankstellenmealV",
+      "asset_pattern": "Tankstellenmeal_*.zip",
+      "executable": "Tankstellenmeal/Tankstellenmeal.exe",
+      "install_directory": "Tankstellenmeal"
     }
   ]
 }

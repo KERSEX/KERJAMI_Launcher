@@ -33,7 +33,7 @@ portable Paket und prüft es von außen. Details stehen in
 [docs/02-implementierungsplan.md](docs/02-implementierungsplan.md).
 
 Noch nicht geklärt oder nie gelaufen: die Qt-Lizenz beim statischen Linken (E-01), die GitHub-Workflows, ein Build
-mit MSVC und geteiltem Qt, eine Signatur der EXE. Die Projektliste enthält erst KERS Overlay.
+mit MSVC und geteiltem Qt, eine Signatur der EXE. Die Projektliste enthält KERS Overlay und Tankstellenmeal; ein ZIP-Release (Tankstellenmeal, 414 MB) und eine einzelne EXE (KERS Overlay) sind echt installiert und gestartet worden, ein Update zwischen zwei echten Versionen noch nicht (E-02).
 
 ## Bauen
 

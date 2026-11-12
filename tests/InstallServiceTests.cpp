@@ -27,12 +27,16 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
 #include <QProcess>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
 #include <windows.h>
+
+#include <tlhelp32.h>
 
 #include <memory>
 
@@ -870,6 +874,290 @@ private slots:
         QVERIFY(!installed.contains(project.id));
         QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(layout.projectDir(project.installDirectory)), 20000);
         QTRY_VERIFY_WITH_TIMEOUT(QDir(paths.tempDir()).isEmpty(), 20000);
+    }
+
+    /// The programs that run from below @p folder, as process id and file name. A game started through a
+    /// small starter program runs as a child with another image: this finds the starter and the game alike.
+    static QMap<DWORD, QString> processesBelow(const QString& folder)
+    {
+        QMap<DWORD, QString> found;
+        const QString prefix = QDir::cleanPath(folder).toLower() + u'/';
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+            return found;
+        PROCESSENTRY32W entry;
+        entry.dwSize = sizeof(entry);
+        for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            if (!process)
+                continue;
+            wchar_t image[4096];
+            DWORD size = static_cast<DWORD>(sizeof(image) / sizeof(image[0]));
+            if (QueryFullProcessImageNameW(process, 0, image, &size)) {
+                const QString full =
+                    QDir::cleanPath(QString::fromWCharArray(image, static_cast<qsizetype>(size)));
+                if (full.toLower().startsWith(prefix))
+                    found.insert(entry.th32ProcessID, QFileInfo(full).fileName());
+            }
+            CloseHandle(process);
+        }
+        CloseHandle(snapshot);
+        return found;
+    }
+
+    /// Visible windows that belong to one of the processes.
+    static int visibleWindowsOf(const QSet<DWORD>& pids)
+    {
+        struct Search {
+            const QSet<DWORD>* pids;
+            int visible = 0;
+        } search {&pids};
+        EnumWindows(
+            [](HWND window, LPARAM parameter) -> BOOL {
+                auto* search = reinterpret_cast<Search*>(parameter);
+                DWORD owner = 0;
+                GetWindowThreadProcessId(window, &owner);
+                if (search->pids->contains(owner) && IsWindowVisible(window))
+                    ++search->visible;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&search));
+        return search.visible;
+    }
+
+    /// Asks the windows of the processes to close, waits, and ends what is still there by force.
+    /// Returns true if nothing runs from below @p folder any more.
+    static bool closeEverythingBelow(const QString& folder)
+    {
+        const QMap<DWORD, QString> running = processesBelow(folder);
+        if (running.isEmpty())
+            return true;
+        struct Request {
+            const QMap<DWORD, QString>* pids;
+        } request {&running};
+        EnumWindows(
+            [](HWND window, LPARAM parameter) -> BOOL {
+                auto* asked = reinterpret_cast<Request*>(parameter);
+                DWORD owner = 0;
+                GetWindowThreadProcessId(window, &owner);
+                if (asked->pids->contains(owner))
+                    PostMessageW(window, WM_CLOSE, 0, 0);
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&request));
+        for (int i = 0; i < 30 && !processesBelow(folder).isEmpty(); ++i)
+            QTest::qWait(500);
+
+        const QMap<DWORD, QString> left = processesBelow(folder);
+        for (auto it = left.cbegin(); it != left.cend(); ++it) {
+            qInfo() << "Did not close when asked, ended by force:" << it.value() << it.key();
+            if (HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, it.key())) {
+                TerminateProcess(process, 1);
+                CloseHandle(process);
+            }
+        }
+        for (int i = 0; i < 20 && !processesBelow(folder).isEmpty(); ++i)
+            QTest::qWait(250);
+        return processesBelow(folder).isEmpty();
+    }
+
+    /// The real thing for a game: Tankstellenmeal (a ZIP of about 414 MB with the whole Unreal Engine
+    /// package in it) is downloaded from GitHub, checked, unpacked into a temporary folder, optionally
+    /// started for a while, and removed again. It runs only when asked for with its own switch, because it
+    /// is a large download: LAUNCHER_LIVE_GAME_TESTS=1, and with LAUNCHER_LIVE_START_TESTS=1 as well the game
+    /// is started and closed again. The test logs what it sees (how the game is started, which program
+    /// stays, what is written next to it) so that the entry of the list can be judged from facts.
+    void liveInstallOfTankstellenmeal()
+    {
+        if (!qEnvironmentVariableIsSet("LAUNCHER_LIVE_GAME_TESTS"))
+            QSKIP(
+                "Set LAUNCHER_LIVE_GAME_TESTS=1 to download Tankstellenmeal (a ZIP of about 414 MB) from "
+                "GitHub, install it into a temporary folder and remove it again. LAUNCHER_LIVE_START_TESTS=1 "
+                "as well starts the game for about half a minute.");
+
+        launcher::RegistryManager list;
+        QVERIFY(list.loadBuiltIn());
+        Project project;
+        for (const Project& candidate : list.projects()) {
+            if (candidate.id == u"tankstellenmeal"_s)
+                project = candidate;
+        }
+        QVERIFY2(!project.id.isEmpty(), "Tankstellenmeal is not in the built-in list");
+
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        PathManager paths(root.filePath(u"app"_s));
+        QVERIFY(QDir().mkpath(paths.root()));
+        QVERIFY(paths.prepare().ok());
+
+        GitHubClient client(GitHubClient::Policy::production());
+        launcher::LibraryLayout layout(paths.libraryDir(), paths.tempDir());
+        InstalledProjects installed(paths.stateFile());
+        installed.load();
+        ReleaseManager releases(client);
+        DownloadManager downloads(client, paths.tempDir(), paths.downloadsDir());
+        launcher::Installer installer(layout, installed);
+        launcher::Uninstaller uninstaller(layout, installed);
+        InstallService service(client, releases, downloads, installer, uninstaller, installed, layout);
+
+        // Whatever happens below, nothing of the game keeps running when the test ends.
+        struct Guard {
+            QString folder;
+            ~Guard() { closeEverythingBelow(folder); }
+        } guard {layout.projectDir(project.installDirectory)};
+
+        // Progress, so that a long download is visible in the log.
+        ProjectStatus::Stage lastStage = ProjectStatus::Stage::Idle;
+        qint64 lastLogged = -1;
+        connect(&service, &InstallService::statusChanged, this, [&] {
+            const ProjectStatus status = service.status(project.id);
+            if (status.stage != lastStage) {
+                lastStage = status.stage;
+                qInfo() << "Stage" << static_cast<int>(status.stage) << "of" << status.total << "bytes";
+            }
+            const qint64 megabytes = status.done / (50 * 1024 * 1024); // a line per 50 MB
+            if (megabytes != lastLogged) {
+                lastLogged = megabytes;
+                qInfo() << "  ...stage" << static_cast<int>(status.stage) << status.done / (1024 * 1024)
+                        << "MB";
+            }
+        });
+
+        QElapsedTimer clock;
+        clock.start();
+        QSignalSpy finished(&service, &InstallService::installFinished);
+        service.install(project);
+        QVERIFY2(finished.wait(1200000), "no end of the installation within twenty minutes");
+        const OperationFailure failure = service.lastFailure(project.id);
+        QVERIFY2(finished.first().at(1).toBool(),
+            qPrintable(
+                u"installation failed: kind %1, code %2, HTTP %3, %4"_s.arg(static_cast<int>(failure.kind))
+                    .arg(failure.code)
+                    .arg(failure.httpStatus)
+                    .arg(failure.detail)));
+        qInfo() << "Download, check and unpacking took" << clock.elapsed() / 1000.0 << "seconds";
+
+        const std::optional<launcher::InstalledProject> record = installed.get(project.id);
+        QVERIFY(record.has_value());
+        QVERIFY(record->tag.startsWith(project.tagPrefix));
+        QCOMPARE(record->executable, project.executable);
+        const std::optional<launcher::ReleaseSelection> selection = releases.latest(project.id);
+        QVERIFY(selection.has_value());
+        QCOMPARE(record->version, selection->release.version.toString());
+        QVERIFY2(!selection->asset.sha256.isEmpty(), "GitHub announced no digest"); // the install checked it
+        qInfo() << "Installed" << record->tag << "from" << selection->asset.name << selection->asset.size
+                << "bytes";
+
+        // The start file is where the list says, and it is a Windows program.
+        const QString exe = layout.executablePath(*record);
+        QVERIFY2(QFileInfo(exe).isFile(), qPrintable(exe));
+        QFile file(exe);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray head = file.read(4096);
+        file.close();
+        QVERIFY(head.startsWith("MZ"));
+        const int peOffset =
+            static_cast<unsigned char>(head.at(0x3C)) | (static_cast<unsigned char>(head.at(0x3D)) << 8);
+        QVERIFY(peOffset > 0 && peOffset + 4 <= head.size());
+        QCOMPARE(head.mid(peOffset, 4), QByteArray("PE\0\0", 4));
+        qInfo() << "Start file" << record->executable << QFileInfo(exe).size() << "bytes";
+
+        // The game proper, as Unreal lays it out: the engine's program next to the content.
+        const QString current = layout.currentDir(project.installDirectory);
+        const QString shipping = current + u"/Tankstellenmeal/Tankstellenmeal/Binaries/Win64/"_s
+            + u"Tankstellenmeal-Win64-Shipping.exe"_s;
+        QVERIFY2(QFileInfo(shipping).isFile(), qPrintable(shipping));
+        QVERIFY(QFileInfo(current + u"/Tankstellenmeal/Engine"_s).isDir());
+
+        // Everything arrived: count and size, and no name with a backslash.
+        const auto survey = [&current] {
+            QMap<QString, qint64> files;
+            QDirIterator it(current, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                it.next();
+                files.insert(QDir(current).relativeFilePath(it.filePath()), it.fileInfo().size());
+            }
+            return files;
+        };
+        const QMap<QString, qint64> before = survey();
+        qint64 total = 0;
+        for (auto it = before.cbegin(); it != before.cend(); ++it) {
+            total += it.value();
+            QVERIFY2(!it.key().contains(u'\\'), qPrintable(it.key()));
+        }
+        qInfo() << "Files in current/:" << before.size() << "," << total / (1024 * 1024) << "MiB";
+        QVERIFY(before.size() >= 30); // the release holds 35 files in 35 folders
+
+        // Nothing is left over: no download, no staging folder.
+        QVERIFY(QDir(paths.downloadsDir()).isEmpty());
+        QVERIFY2(QDir(paths.tempDir()).isEmpty(), qPrintable(QDir(paths.tempDir()).entryList().join(u',')));
+
+        if (qEnvironmentVariableIsSet("LAUNCHER_LIVE_START_TESTS")) {
+            launcher::ProcessManager processes(layout, installed);
+            processes.setPolling(false);
+
+            const launcher::StartResult started = processes.start(project.id);
+            QVERIFY2(started.ok(), qPrintable(started.detail));
+            QVERIFY(started.processId > 0);
+            QVERIFY(installed.get(project.id)->lastStartedAt.isValid());
+            qInfo() << "Started the start file as process" << started.processId;
+
+            // Half a minute: which programs run, does one show a window, what does the launcher think?
+            QSet<QString> seenPrograms;
+            int mostVisible = 0;
+            bool starterEnded = false;
+            bool launcherSaidRunningAfterStarterEnded = false;
+            for (int second = 1; second <= 30; ++second) {
+                QTest::qWait(1000);
+                processes.refresh();
+                const QMap<DWORD, QString> running = processesBelow(current);
+                QSet<DWORD> pids;
+                for (auto it = running.cbegin(); it != running.cend(); ++it) {
+                    pids.insert(it.key());
+                    seenPrograms.insert(it.value());
+                }
+                const int visible = visibleWindowsOf(pids);
+                mostVisible = qMax(mostVisible, visible);
+                const bool starterAlive = running.contains(static_cast<DWORD>(started.processId));
+                if (!starterAlive && !starterEnded) {
+                    starterEnded = true;
+                    qInfo() << "  the starter (process" << started.processId << ") has ended after" << second
+                            << "s";
+                }
+                const bool launcherRunning = processes.isRunningNow(project.id);
+                if (starterEnded && launcherRunning)
+                    launcherSaidRunningAfterStarterEnded = true;
+                if (second % 3 == 0 || second == 1)
+                    qInfo() << "  after" << second << "s: programs" << QStringList(running.values())
+                            << ", visible windows" << visible << ", launcher says running" << launcherRunning;
+            }
+            qInfo() << "Programs seen:" << QStringList(seenPrograms.values()) << ", most visible windows"
+                    << mostVisible << ", starter ended" << starterEnded
+                    << ", launcher still said running after"
+                    << "the starter ended:" << launcherSaidRunningAfterStarterEnded;
+            if (const std::optional<launcher::ProcessExit> exit = processes.lastExit(project.id))
+                qInfo() << "The starter ended with exit code" << exit->exitCode << "after" << exit->runSeconds
+                        << "s";
+
+            // What the game wrote next to itself, to judge whether the entry needs "keep".
+            const QMap<QString, qint64> after = survey();
+            QStringList added;
+            for (auto it = after.cbegin(); it != after.cend(); ++it) {
+                if (!before.contains(it.key()))
+                    added.append(it.key() + u" ("_s + QString::number(it.value()) + u" bytes)"_s);
+            }
+            qInfo() << "Files the game added below current/:" << added.size() << added.mid(0, 30);
+
+            QVERIFY2(closeEverythingBelow(current), "something of the game is still running");
+            QTest::qWait(1000); // let the files go
+        }
+
+        // And away again.
+        const launcher::UninstallResult removed = service.uninstall(project.id);
+        QVERIFY2(removed.ok(), qPrintable(removed.detail));
+        QVERIFY(!installed.contains(project.id));
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(layout.projectDir(project.installDirectory)), 60000);
+        QTRY_VERIFY_WITH_TIMEOUT(QDir(paths.tempDir()).isEmpty(), 60000);
     }
 
     void uninstallIsRefusedWhileInstalling()

@@ -79,5 +79,5 @@ nur einen Entwurf an, den man ansehen und selbst veröffentlichen muss.
 - Eine **Signatur** der EXE erwägen: Ohne sie warnt Windows SmartScreen vor neuen Downloads, und Virenscanner
   sind misstrauischer (ein früherer Fehlalarm, D-40).
 - Die Workflows einmal laufen lassen, oder von Hand veröffentlichen.
-- Die Projektliste vervollständigen (E-07): Für Tankstellenmeal fehlt der Pfad der Startdatei im ZIP, die
-  anderen vier Projekte haben noch kein Release.
+- Die Projektliste vervollständigen (E-07): KERS Overlay und Tankstellenmeal sind eingetragen, die anderen vier
+  Projekte haben noch kein Release.

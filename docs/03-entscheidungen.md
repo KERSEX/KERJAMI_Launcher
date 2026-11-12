@@ -38,17 +38,20 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 - **Stand 2026-11-11:** KERS Overlay ist seit D-44 der erste Eintrag der Liste und dient als echtes
   Testprojekt, allerdings mit einer **einzelnen EXE**, nicht mit einem ZIP. Mit Erlaubnis des Teams wurde die
   ganze Installation einmal echt ausgeführt (`LAUNCHER_LIVE_DOWNLOAD_TESTS=1`, siehe die Bekannten Grenzen):
-  bestanden. **Nicht echt getestet** sind weiter: ein ZIP-Release (Archivprüfung und Entpacken gegen eine echte
-  Datei), ein Update von einer Version auf die nächste und das Selbstupdate des Launchers. Dafür bräuchte es
-  die Testprojekte von oben.
+  bestanden. **Stand 2026-11-12:** Tankstellenmeal (E-07) ist ein echtes ZIP-Release; Download, Prüfung,
+  Entpacken, Start und Entfernen liefen einmal echt durch (`LAUNCHER_LIVE_GAME_TESTS=1`, siehe die Bekannten
+  Grenzen). **Nicht echt getestet** sind weiter: ein Update von einer Version auf die nächste und das
+  Selbstupdate des Launchers. Dafür bräuchte es zwei Releases eines Projekts, die der Launcher nacheinander
+  installiert, und ein Release des Launchers selbst.
 - **Betrifft:** Phase 4 und 5 (echter Test). Phase 2 und 3 sind nicht blockiert.
 
 ### E-03 Registry-Repository (erledigt: es gibt keines)
 
 - **Entschieden (2026-11-11):** Die Projektliste ist Teil des Launchers und kommt mit seinen Updates
   (D-43). Es gibt kein Registry-Repository, keine Registry-Adresse und keinen Abruf der Liste.
-- **Offen bleibt der Inhalt der Liste.** Jeder Eintrag braucht die Felder aus `docs/registry/README.md`,
-  darunter den Pfad der Startdatei im ZIP, und das Projekt ein ZIP-Release (E-07).
+- **Inhalt der Liste:** KERS Overlay und Tankstellenmeal sind eingetragen (E-07). Die übrigen vier Projekte
+  brauchen zuerst ein Release. Jeder Eintrag braucht die Felder aus `docs/registry/README.md`, bei einem ZIP auch
+  den Pfad der Startdatei darin.
 
 ### E-05 Helles Theme
 
@@ -85,7 +88,7 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 
   | Repository | Releases | Dateien im Release |
   |---|---|---|
-  | `Amil300/Tankstellenmeal` (Spiel, UE 5.8) | 4 | je ein ZIP mit SHA-256-Digest, z. B. `Tankstellenmeal_0.12.3.zip`, rund 395 MB |
+  | `Amil300/Tankstellenmeal` (Spiel, UE 5.8) | 4 | je ein ZIP mit SHA-256-Digest, z. B. `Tankstellenmeal_0.12.3.zip`, 414 MB (395 MiB gepackt) |
   | `KERSEX/KERS_Overlay` | mindestens 5 | je eine einzelne `KERS_Subsystems.exe` mit Digest (56 MB, früher 232 MB) |
   | `KERSEX/KERIA-AI_HUB`, `KERSEX/KERS_Mods`, `KERSEX/SellAndRun`, `KERSEX/Karriereleiter` | keines | – |
   | `KERSEX/KERJAMI_Launcher` | keines | – |
@@ -104,9 +107,41 @@ Antwort des Teams, bevor die genannte Phase beginnt.
 - **Einzel-EXE-Releases: gelöst** durch D-44. **KERS Overlay ist der erste Eintrag der Projektliste**
   (`tag_prefix` `KERS_SubsystemsV`, Datei `KERS_Subsystems.exe`). Ein Live-Test gegen GitHub
   (`LAUNCHER_LIVE_TESTS=1`, nur Metadaten) findet Version 0.3.1, 56,2 MiB, Prüfsumme vorhanden.
-- **Fehlt noch für einen echten Test von Tankstellenmeal:** der Pfad der Startdatei im ZIP (`executable`). Ihn
-  kennt Amil oder das ZIP selbst; es wurde nicht geladen. Für die anderen vier Projekte braucht es zuerst ein
-  Release mit ZIP.
+- **Tankstellenmeal ist der zweite Eintrag der Projektliste (2026-11-12).** Das Team nannte die EXE als
+  Startdatei. Ihren Pfad im ZIP zeigt nur dessen Dateiliste; mit ausdrücklicher Erlaubnis wurde dafür nur das Ende
+  der Datei der Version 0.12.3 per Teilabruf geladen (2 MiB mit dem Verzeichnis, nicht die 414 MB; nur kurz in einer
+  temporären Datei, die danach gelöscht wurde; nichts wurde ausgeführt). Gefunden:
+  - **70 Einträge, 35 Dateien und 35 Ordner**, 558 MiB entpackt, die größte Datei 228 MiB (`Content/Paks/….ucas`), längster Pfad 134 Zeichen,
+    schlechtestes Verhältnis 5 : 1, Verfahren „gespeichert“ und „deflate“. Alles liegt unter den Grenzen des
+    Launchers (20000 Einträge, 4 GiB, 200 Zeichen, 24 Ebenen, Faktor 500).
+  - **Alles liegt unter einem Ordner `Tankstellenmeal\`:** `Tankstellenmeal\Tankstellenmeal.exe` (0,2 MiB, die
+    Startdatei), `Tankstellenmeal\Engine\…` und `Tankstellenmeal\Tankstellenmeal\…`. Der Eintrag lautet deshalb
+    `"executable": "Tankstellenmeal/Tankstellenmeal.exe"`, `"asset_pattern": "Tankstellenmeal_*.zip"`,
+    `"tag_prefix": "TankstellenmealV"`. Gespeichert wird unter `library/Tankstellenmeal/current/Tankstellenmeal/`.
+  - **Das ZIP kommt von Windows (PowerShell):** Namen mit Backslashes, Einträge für Ordner, Systemkennung MS-DOS,
+    keine Attribute. Der Launcher macht aus den Backslashes Ordner; `InstallerTests` installiert ein ZIP mit genau
+    diesem Aufbau.
+  - **Der echte Lauf (2026-11-12, mit Erlaubnis des Teams):** Der ganze Weg gegen echtes GitHub, in einem
+    temporären Ordner: Release-Abfrage, Weiterleitung, 414.251.249 Byte in 12 s, SHA-256 gegen den Digest von GitHub,
+    Archivprüfung, 558 MiB entpackt, Eintrag in die Liste, alles in 12,6 bis 16 s. Die Startdatei ist ein Windows-Programm
+    (PE-Kopf), das Spiel liegt vollständig da (35 Dateien). Danach nichts übrig außer dem Programm selbst.
+  - **Der Start:** `Tankstellenmeal.exe` ist die kleine EXE von Unreal und startet das eigentliche Spiel
+    (`Tankstellenmeal\Tankstellenmeal\Binaries\Win64\Tankstellenmeal-Win64-Shipping.exe`, 160 MiB). **Die kleine
+    EXE bleibt dabei die ganze Zeit am Leben** (30 s beobachtet), und der Launcher meldet das Spiel durchgehend als
+    laufend: Die Befürchtung, sie beende sich sofort und der Launcher halte das Spiel dann für beendet, hat sich nicht
+    bestätigt. Das Fenster erschien nach etwa drei Sekunden. Die Startdatei bleibt `Tankstellenmeal/Tankstellenmeal.exe`.
+  - **`keep` ist nicht nötig, gemessen:** Das Spiel legte nichts unterhalb von `current/` an. Es schreibt nach
+    `%LOCALAPPDATA%\Tankstellenmeal\Saved` und **verändert beim Start vorhandene Spielstände** (`Spielstand.sav` und
+    seine Sicherung, den Shader-Cache, dazu eine neue Absturzmeldungs-Konfiguration). Dieser Lauf sicherte den
+    Ordner vorher mit einem einmaligen Hilfsskript (nicht im Repository) und stellte ihn danach Byte für Byte wieder
+    her. Wer das Spiel über den Launcher startet, spielt wie sonst auch mit seinen echten Spielständen.
+  - **Schließen:** Die Aufforderung zum Schließen (`WM_CLOSE`) beendete das Spiel nicht innerhalb von 15 s; der Test
+    beendete beide Prozesse dann hart. Das betrifft nur den Test. Der Launcher beendet laufende Projekte nie selbst.
+  - **Tags für künftige Releases:** Ein Tag braucht drei Zahlen (`TankstellenmealV0.12.4`). `V0.12` und `V012.2`
+    ignoriert der Launcher, ein solches Release bliebe unsichtbar.
+  - **Nicht getestet:** ein Update von einer Version des Spiels auf die nächste und die Bedienung durch das
+    Fenster des Launchers (der Test ruft denselben `InstallService` und `ProcessManager` auf wie die Knöpfe).
+  Für die anderen vier Projekte braucht es zuerst ein Release.
 - **Betrifft:** Inhalt der Projektliste (E-03, D-43), echte Tests (E-02), Phase 7 (Projektseiten).
 
 ## Getroffen
@@ -861,8 +896,8 @@ als einfacher Weg für Tests und Werkzeuge.
   `raw.githubusercontent.com` in der Netzwerk-Policy.
 - **Pflege:** Einen Eintrag ergänzen heißt `resources/registry/projects.json` ändern, bauen, testen, ein
   Release des Launchers veröffentlichen. Die Felder stehen in `docs/registry/README.md`.
-- **Aktueller Inhalt: leer.** Für jeden Eintrag fehlen noch Angaben, die nur das Team kennt: der Pfad der
-  Startdatei im ZIP, bei vier Projekten auch ein ZIP-Release (E-07).
+- **Aktueller Inhalt:** KERS Overlay und Tankstellenmeal. Für die übrigen vier Projekte fehlt zuerst ein
+  Release (E-07).
 
 ### D-44 Einzel-EXE-Releases (ergänzt D-14)
 
@@ -1070,7 +1105,8 @@ als einfacher Weg für Tests und Werkzeuge.
   `release-assets.githubusercontent.com`, 58.974.720 Byte in 3,7 s, SHA-256 gegen den Digest von GitHub, gültiger
   Windows-Programmkopf, Installation in 4,8 s, danach nichts übrig. Damit ist die Kette (Adressen, Digest-Feld,
   Weiterleitung, Prüfsumme, Installation, Deinstallation) **für eine einzelne EXE** gegen echtes GitHub gemessen
-  und nicht mehr nur nachgestellt. Für ein ZIP, ein Update und das Selbstupdate gilt das weiter nicht (E-02).
+  und nicht mehr nur nachgestellt. Für ein ZIP gilt es seit 2026-11-12 (nächster Punkt), für ein Update und das
+  Selbstupdate weiter nicht (E-02).
   Mit `LAUNCHER_LIVE_START_TESTS=1` zusätzlich startet der Test das installierte Programm über den
   `ProcessManager`, beobachtet es zehn Sekunden, bittet seine Fenster zu schließen (erst danach würde er es
   beenden), wartet auf das Prozessende und deinstalliert dann. **Lauf vom 2026-11-11** (mit Erlaubnis des
@@ -1079,6 +1115,14 @@ als einfacher Weg für Tests und Werkzeuge.
   Schließen beenden, kein Prozess blieb übrig, und die Deinstallation ging danach durch. Es legte neben sich
   einen Ordner `data/` an. Der Start im Arbeitsordner des Projekts ist außerdem mit einem Hilfsprogramm getestet
   (`ProcessTests::aProjectIsStartedInItsOwnFolder`).
+- Der dritte Live-Test, `LAUNCHER_LIVE_GAME_TESTS=1` (`InstallServiceTests::liveInstallOfTankstellenmeal`), lädt
+  das ZIP von Tankstellenmeal (414 MB), prüft es, entpackt es (558 MiB) in einen temporären Ordner und entfernt es
+  wieder; mit `LAUNCHER_LIVE_START_TESTS=1` startet er das Spiel 30 Sekunden und beendet es. Er läuft nie von
+  allein, weil er groß ist und ein Spielfenster öffnet. **Wer ihn laufen lässt, sollte den Ordner
+  `%LOCALAPPDATA%\Tankstellenmeal` vorher sichern**, denn das Spiel verändert beim Start vorhandene Spielstände (der
+  Test tut das nicht für ihn). Lauf vom 2026-11-12: bestanden (siehe E-07). Der Test meldet außerdem zweimal
+  „QIODevice::read (QSslSocket): device not open“; das ist eine Meldung von Qt, als die Verbindung zu GitHub nach dem
+  Download im Leerlauf geschlossen wurde, und wurde nicht weiter untersucht.
 - Der Schutz vor dem Überschreiben eines laufenden Projekts beruht auf der Windows-Dateisperre: Die
   EXE eines laufenden Programms und jede geöffnete Datei in `current/` verhindern das Umbenennen
   des Ordners. Das ist getestet (Datei ohne Löschfreigabe offen halten). Ein Programm, das aus
